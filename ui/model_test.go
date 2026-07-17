@@ -1,9 +1,18 @@
 package ui
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/alex-irvine/lazydiff/agent"
+	"github.com/alex-irvine/lazydiff/config"
+	"github.com/alex-irvine/lazydiff/delta"
 	"github.com/alex-irvine/lazydiff/diff"
+	"github.com/alex-irvine/lazydiff/git"
+	"github.com/alex-irvine/lazydiff/prompt"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func testFiles() []diff.File {
@@ -66,3 +75,131 @@ func TestComputeLayoutCapsTreeAndStacksReview(t *testing.T) {
 		}
 	}
 }
+
+type fakeLoader struct {
+	snapshots []git.Snapshot
+	index     int
+}
+
+func (f *fakeLoader) Snapshot(context.Context, git.Mode) (git.Snapshot, error) {
+	snapshot := f.snapshots[f.index]
+	if f.index < len(f.snapshots)-1 {
+		f.index++
+	}
+	return snapshot, nil
+}
+
+type fakeRenderer struct{}
+
+func (fakeRenderer) Render(_ context.Context, raw string, _ int) delta.Result {
+	return delta.Result{Content: "ANSI:" + raw, Styled: true}
+}
+
+type fakeRunner struct {
+	requests []agent.Request
+	events   []agent.Event
+}
+
+func (f *fakeRunner) Run(_ context.Context, request agent.Request, emit func(agent.Event)) error {
+	f.requests = append(f.requests, request)
+	for _, event := range f.events {
+		emit(event)
+	}
+	return nil
+}
+
+func makeSnapshot(id string) git.Snapshot {
+	files := testFiles()
+	files[0].Raw = "diff --git a/a.go b/a.go\n@@ -1 +1 @@\n-old\n+new\n"
+	files[0].Hunks[0].Raw = "@@ -1 +1 @@\n-old\n+new\n"
+	return git.Snapshot{ID: id, Mode: git.WorkingTree, RawDiff: files[0].Raw, Files: files}
+}
+
+func newTestModel(loader SnapshotLoader, runner agent.Runner) Model {
+	cfg := config.Default()
+	templates, err := prompt.Parse(cfg.Agent.Prompts.Overall, cfg.Agent.Prompts.Detail)
+	if err != nil {
+		panic(err)
+	}
+	return NewModel(git.Repository{Root: "/repo"}, cfg, loader, fakeRenderer{}, runner, templates)
+}
+
+func TestModelRefreshAndAnalysisContext(t *testing.T) {
+	loader := &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}
+	runner := &fakeRunner{events: []agent.Event{{Kind: agent.Output, Text: "analysis line"}}}
+	model := newTestModel(loader, runner)
+	_, cmd := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if cmd == nil {
+		t.Fatal("resize did not produce refresh command")
+	}
+	msg := cmd()
+	model, _ = model.Update(msg)
+	if model.snapshot.ID != "one" {
+		t.Fatalf("snapshot = %+v", model.snapshot)
+	}
+	model.focus = FocusTree
+	model.tree.Toggle()
+	model.tree.Move(1)
+	model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	if cmd == nil {
+		t.Fatal("detail key did not create command")
+	}
+	cmd()
+	if len(runner.requests) != 1 || !strings.Contains(runner.requests[0].Prompt, "Selected diff:") || !strings.Contains(runner.requests[0].Prompt, "@@ -1 +1 @@") {
+		t.Fatalf("requests = %+v", runner.requests)
+	}
+}
+
+func TestModelMarksCompletedResultStaleAfterRefresh(t *testing.T) {
+	loader := &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one"), makeSnapshot("two")}, index: 1}
+	runner := &fakeRunner{}
+	model := newTestModel(loader, runner)
+	model.termW, model.termH = 120, 40
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	if cmd == nil {
+		t.Fatal("overall key did not create command")
+	}
+	cmd()
+	model, cmd = model.Update(refreshMsg{})
+	if cmd == nil {
+		t.Fatal("refresh message did not schedule refresh")
+	}
+	model, _ = model.Update(cmd())
+	for _, result := range model.results {
+		if !result.Stale {
+			t.Fatal("result was not marked stale")
+		}
+	}
+}
+
+func TestModelCancellation(t *testing.T) {
+	loader := &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}
+	runner := &blockingRunner{}
+	model := newTestModel(loader, runner)
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.termW, model.termH = 120, 40
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	if cmd == nil {
+		t.Fatal("analysis command missing")
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	cmd()
+	if runner.cancelled == false {
+		t.Fatal("runner was not cancelled")
+	}
+}
+
+type blockingRunner struct{ cancelled bool }
+
+func (b *blockingRunner) Run(ctx context.Context, _ agent.Request, _ func(agent.Event)) error {
+	<-ctx.Done()
+	b.cancelled = true
+	return ctx.Err()
+}
+
+var _ = time.Second
