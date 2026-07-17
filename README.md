@@ -25,8 +25,11 @@
 
 ```bash
 go build -o lazydiff ./cmd/lazydiff
+./lazydiff --version
 ./lazydiff
 ```
+
+Local builds report `lazydiff dev`. Release binaries report their `vX.Y.Z` tag.
 
 Run from repository root. Use custom TOML configuration with:
 
@@ -116,12 +119,67 @@ delta --paging=never --color-only --width=<available width>
 
 Delta inherits Git configuration, including syntax themes, line numbers, side-by-side settings, and colors. If Delta is unavailable or fails, `lazydiff` displays raw diff and reports fallback status.
 
+## Install Releases
+
+Releases are published at [GitHub Releases](https://github.com/alex-irvine/lazydiff/releases). Install GitHub CLI (`gh`) first.
+
+Linux amd64:
+
+```bash
+mkdir -p ~/.local/bin
+gh release download vX.Y.Z --repo alex-irvine/lazydiff --pattern 'lazydiff-linux-amd64' --output ~/.local/bin/lazydiff --clobber
+chmod +x ~/.local/bin/lazydiff
+```
+
+macOS Apple Silicon:
+
+```bash
+mkdir -p ~/.local/bin
+gh release download vX.Y.Z --repo alex-irvine/lazydiff --pattern 'lazydiff-darwin-arm64' --output ~/.local/bin/lazydiff --clobber
+chmod +x ~/.local/bin/lazydiff
+```
+
+macOS Intel uses `lazydiff-darwin-amd64`:
+
+```bash
+mkdir -p ~/.local/bin
+gh release download vX.Y.Z --repo alex-irvine/lazydiff --pattern 'lazydiff-darwin-amd64' --output ~/.local/bin/lazydiff --clobber
+chmod +x ~/.local/bin/lazydiff
+```
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.local\bin"
+gh release download vX.Y.Z --repo alex-irvine/lazydiff --pattern "lazydiff-windows-amd64.exe" --output "$HOME\.local\bin\lazydiff.exe" --clobber
+```
+
+Replace `vX.Y.Z` with release tag. Repeat install command with `--clobber` to upgrade.
+
+### Verify Checksums
+
+```bash
+gh release download vX.Y.Z --repo alex-irvine/lazydiff --pattern checksums.txt
+sha256sum -c checksums.txt
+```
+
+On macOS without `sha256sum`, use `shasum -a 256 -c checksums.txt`.
+
+## Release Requirements
+
+- Git is required.
+- Delta is optional; raw diff is used when Delta is unavailable.
+- Copilot CLI is required only for default `provider = "copilot"`.
+- `provider = "generic"` supports configured local agents through stdin.
+- Configuration path is `$XDG_CONFIG_HOME/lazydiff/config.toml` or `$HOME/.config/lazydiff/config.toml`.
+
 ## Verification
 
 ```bash
 go test ./... -count=1
 go vet ./...
 go build ./...
+git diff --check
 ```
 
 Linux PTY integration tests use temporary repositories and fake Delta/agent commands:
@@ -130,4 +188,4 @@ Linux PTY integration tests use temporary repositories and fake Delta/agent comm
 go test ./integration -v -count=1
 ```
 
-Visual reference: [`docs/lazydiff-visual.html`](docs/lazydiff-visual.html). Design specification: [`docs/superpowers/specs/2026-07-17-lazydiff-design.md`](docs/superpowers/specs/2026-07-17-lazydiff-design.md).
+Visual reference: [`docs/lazydiff-visual.html`](docs/lazydiff-visual.html). Product design: [`docs/superpowers/specs/2026-07-17-lazydiff-design.md`](docs/superpowers/specs/2026-07-17-lazydiff-design.md). CI/release design: [`docs/superpowers/specs/2026-07-17-lazydiff-ci-release-design.md`](docs/superpowers/specs/2026-07-17-lazydiff-ci-release-design.md).
