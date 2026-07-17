@@ -106,6 +106,24 @@ func NewModel(repo git.Repository, cfg config.Config, loader SnapshotLoader, ren
 	}
 }
 
+type TeaModel struct {
+	model Model
+}
+
+func NewTeaModel(model Model) *TeaModel { return &TeaModel{model: model} }
+
+func (t *TeaModel) SetSend(send func(tea.Msg)) { t.model.SetSend(send) }
+
+func (t *TeaModel) Init() tea.Cmd { return t.model.Init() }
+
+func (t *TeaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	updated, cmd := t.model.Update(msg)
+	t.model = updated
+	return t, cmd
+}
+
+func (t *TeaModel) View() string { return t.model.View() }
+
 func (m *Model) SetSend(send func(tea.Msg)) { m.send = send }
 
 func (m Model) Init() tea.Cmd { return m.refreshCmd() }
