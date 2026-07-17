@@ -14,6 +14,7 @@ import (
 	"github.com/alex-irvine/lazydiff/git"
 	"github.com/alex-irvine/lazydiff/prompt"
 	"github.com/alex-irvine/lazydiff/ui"
+	"github.com/alex-irvine/lazydiff/version"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -25,6 +26,12 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	for _, arg := range args[1:] {
+		if arg == "--version" || arg == "-version" {
+			_, err := fmt.Fprintf(stdout, "lazydiff %s\n", version.Current)
+			return err
+		}
+	}
 	flags := flag.NewFlagSet("lazydiff", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configPath := flags.String("config", config.ConfigPath(), "TOML config path")

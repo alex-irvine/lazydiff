@@ -1,12 +1,35 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestRunVersionDoesNotNeedRepository(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"lazydiff", "--version"}, strings.NewReader(""), &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); got != "lazydiff dev\n" {
+		t.Fatalf("version output = %q", got)
+	}
+}
+
+func TestRunShortVersionFlag(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"lazydiff", "-version"}, strings.NewReader(""), &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if stdout.String() != "lazydiff dev\n" {
+		t.Fatalf("output = %q", stdout.String())
+	}
+}
 
 func TestRunRejectsInvalidRepository(t *testing.T) {
 	t.Chdir(t.TempDir())
