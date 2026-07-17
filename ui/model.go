@@ -238,8 +238,10 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			return m, m.renderSelectedCmd()
 		}
 	case "a":
+		m.activeTab = OverallTab
 		return m, m.startAnalysis(false)
 	case "A":
+		m.activeTab = DetailTab
 		return m, m.startAnalysis(true)
 	case "1":
 		m.activeTab = DetailTab
