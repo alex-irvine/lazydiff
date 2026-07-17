@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -23,11 +24,16 @@ func TestGenericStreamsPromptOutputAndDiagnostics(t *testing.T) {
 	command := fakeAgent(t, "exit 0")
 	runner := NewGeneric(command, nil)
 	var events []Event
-	err := runner.Run(context.Background(), Request{RepoRoot: t.TempDir(), Prompt: "prompt-body"}, func(event Event) { events = append(events, event) })
+	var eventsMu sync.Mutex
+	err := runner.Run(context.Background(), Request{RepoRoot: t.TempDir(), Prompt: "prompt-body"}, func(event Event) {
+		eventsMu.Lock()
+		events = append(events, event)
+		eventsMu.Unlock()
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 3 || events[0].Kind != Output || events[0].Text != "out-one" || events[2].Kind != Diagnostic {
+	if len(events) != 3 || !hasEvent(events, Output, "out-one") || !hasEvent(events, Output, "out-two") || !hasEvent(events, Diagnostic, "diagnostic") {
 		t.Fatalf("events = %+v", events)
 	}
 }
@@ -36,10 +42,24 @@ func TestGenericReturnsNonZeroAfterPreservingEvents(t *testing.T) {
 	command := fakeAgent(t, "exit 7")
 	runner := NewGeneric(command, nil)
 	var events []Event
-	err := runner.Run(context.Background(), Request{RepoRoot: t.TempDir(), Prompt: "prompt"}, func(event Event) { events = append(events, event) })
+	var eventsMu sync.Mutex
+	err := runner.Run(context.Background(), Request{RepoRoot: t.TempDir(), Prompt: "prompt"}, func(event Event) {
+		eventsMu.Lock()
+		events = append(events, event)
+		eventsMu.Unlock()
+	})
 	if err == nil || !strings.Contains(err.Error(), "agent exited") || len(events) != 3 {
 		t.Fatalf("err = %v, events = %+v", err, events)
 	}
+}
+
+func hasEvent(events []Event, kind EventKind, text string) bool {
+	for _, event := range events {
+		if event.Kind == kind && event.Text == text {
+			return true
+		}
+	}
+	return false
 }
 
 func TestGenericCancellation(t *testing.T) {
