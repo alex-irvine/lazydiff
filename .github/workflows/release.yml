@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build binaries
+        run: ./scripts/build-all.sh "${{ github.ref_name }}"
+      - name: Verify checksums
+        run: (cd dist && sha256sum -c checksums.txt)
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/lazydiff-linux-amd64
+            dist/lazydiff-darwin-amd64
+            dist/lazydiff-darwin-arm64
+            dist/lazydiff-windows-amd64.exe
+            dist/checksums.txt
+          body: |
+            ## lazydiff ${{ github.ref_name }}
+
+            Git is required. Delta is optional and raw diff is used when Delta is unavailable.
+            Default AI provider is GitHub Copilot CLI; configure provider = "generic" for another local agent.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
