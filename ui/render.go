@@ -18,10 +18,16 @@ func (m Model) View() string {
 		return lipgloss.Place(m.termW, m.termH, lipgloss.Center, lipgloss.Center, lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).Render(m.helpText()))
 	}
 	l := m.layout
-	tree := m.renderTree(l.Tree)
-	diffView := m.renderDiff(l.Diff)
-	analysis := m.renderAnalysis(l.Analysis)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, tree, lipgloss.JoinVertical(lipgloss.Left, diffView, analysis))
+	files := m.renderTree(l.Files)
+	code := m.renderDiff(l.Code)
+	agent := m.renderAnalysis(l.Agent)
+	left := lipgloss.JoinVertical(lipgloss.Left, files, agent)
+	var body string
+	if m.termW < 80 {
+		body = lipgloss.JoinVertical(lipgloss.Left, files, code, agent)
+	} else {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, code)
+	}
 	status := lipgloss.NewStyle().Width(m.termW).Foreground(lipgloss.Color("241")).Render(m.statusLine())
 	return lipgloss.JoinVertical(lipgloss.Left, body, status)
 }

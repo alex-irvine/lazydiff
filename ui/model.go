@@ -265,10 +265,10 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	case "G":
 		if m.focus == FocusDiff {
-			m.diffScroll = max(0, len(delta.Lines(m.diffText))-m.layout.Diff.H+3)
+			m.diffScroll = max(0, len(delta.Lines(m.diffText))-m.layout.Code.H+3)
 		}
 		if m.focus == FocusAnalysis {
-			m.analysisScroll = max(0, len(m.analysisLines())-m.layout.Analysis.H+3)
+			m.analysisScroll = max(0, len(m.analysisLines())-m.layout.Agent.H+3)
 		}
 	case "?":
 		m.showHelp = !m.showHelp
@@ -307,7 +307,7 @@ func (m Model) renderSelectedCmd() tea.Cmd {
 	} else if file.RawDiff() != "" {
 		raw = file.RawDiff()
 	}
-	width := m.layout.Diff.W - 2
+	width := m.layout.Code.W - 2
 	renderer := m.renderer
 	return func() tea.Msg {
 		result := renderer.Render(context.Background(), raw, width)
