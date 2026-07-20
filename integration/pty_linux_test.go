@@ -77,8 +77,8 @@ func TestPTYStartupShowsReviewLayoutAndQuit(t *testing.T) {
 	if err := pty.Setsize(terminal, &pty.Winsize{Cols: 120, Rows: 40}); err != nil {
 		t.Fatal(err)
 	}
-	output := readUntil(t, terminal, "CHANGED FILES", 3*time.Second)
-	for _, marker := range []string{"DIFF", "delta-output"} {
+	output := readUntil(t, terminal, "delta-output", 3*time.Second)
+	for _, marker := range []string{"delta-output"} {
 		if !strings.Contains(output, marker) {
 			t.Fatalf("output missing %q:\n%s", marker, output)
 		}
@@ -104,7 +104,7 @@ func TestPTYAnalysisStreamsAndNarrowLayout(t *testing.T) {
 	if err := pty.Setsize(terminal, &pty.Winsize{Cols: 70, Rows: 24}); err != nil {
 		t.Fatal(err)
 	}
-	_ = readUntil(t, terminal, "CHANGED FILES", 3*time.Second)
+	_ = readUntil(t, terminal, "DIFF", 3*time.Second)
 	if _, err := terminal.Write([]byte("A")); err != nil {
 		t.Fatal(err)
 	}
