@@ -5,7 +5,7 @@ type Rect struct {
 }
 
 type Layout struct {
-	Tree, Diff, Analysis, Status Rect
+	Files, Code, Agent, Status Rect
 }
 
 func ComputeLayout(width, height int) Layout {
@@ -20,30 +20,34 @@ func ComputeLayout(width, height int) Layout {
 	if bodyH < 0 {
 		bodyH = 0
 	}
-	treeW := width * 28 / 100
-	if treeW < 20 && width >= 20 {
-		treeW = 20
+	leftW := width * 28 / 100
+	if leftW < 20 && width >= 20 {
+		leftW = 20
 	}
-	if treeW > width/3 {
-		treeW = width / 3
+	if leftW > width/3 {
+		leftW = width / 3
 	}
 	if width < 20 {
-		treeW = width
+		leftW = width
 	}
-	rightW := width - treeW
+	rightW := width - leftW
 	if width < 80 {
+		filesH := bodyH / 3
+		codeH := bodyH / 2
+		agentH := bodyH - filesH - codeH
 		return Layout{
-			Tree:     Rect{X: 0, Y: 0, W: treeW, H: bodyH / 3},
-			Diff:     Rect{X: 0, Y: bodyH / 3, W: width, H: bodyH / 2},
-			Analysis: Rect{X: 0, Y: bodyH/3 + bodyH/2, W: width, H: bodyH - bodyH/3 - bodyH/2},
-			Status:   Rect{X: 0, Y: bodyH, W: width, H: statusH},
+			Files:  Rect{X: 0, Y: 0, W: width, H: filesH},
+			Code:   Rect{X: 0, Y: filesH, W: width, H: codeH},
+			Agent:  Rect{X: 0, Y: filesH + codeH, W: width, H: agentH},
+			Status: Rect{X: 0, Y: bodyH, W: width, H: statusH},
 		}
 	}
-	diffH := bodyH * 57 / 100
+	filesH := bodyH / 2
+	agentH := bodyH - filesH
 	return Layout{
-		Tree:     Rect{X: 0, Y: 0, W: treeW, H: bodyH},
-		Diff:     Rect{X: treeW, Y: 0, W: rightW, H: diffH},
-		Analysis: Rect{X: treeW, Y: diffH, W: rightW, H: bodyH - diffH},
-		Status:   Rect{X: 0, Y: bodyH, W: width, H: statusH},
+		Files:  Rect{X: 0, Y: 0, W: leftW, H: filesH},
+		Code:   Rect{X: leftW, Y: 0, W: rightW, H: bodyH},
+		Agent:  Rect{X: 0, Y: filesH, W: leftW, H: agentH},
+		Status: Rect{X: 0, Y: bodyH, W: width, H: statusH},
 	}
 }

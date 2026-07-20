@@ -61,17 +61,51 @@ func TestTreeEmptyState(t *testing.T) {
 	}
 }
 
-func TestComputeLayoutCapsTreeAndStacksReview(t *testing.T) {
+func TestComputeLayoutWideSplit(t *testing.T) {
+	l := ComputeLayout(120, 40)
+	bodyH := 39
+	if l.Files.W != 33 || l.Agent.W != l.Files.W || l.Code.X != l.Files.W {
+		t.Fatalf("columns = files=%+v code=%+v agent=%+v", l.Files, l.Code, l.Agent)
+	}
+	if l.Files.H != bodyH/2 || l.Agent.H != bodyH-bodyH/2 || l.Code.H != bodyH {
+		t.Fatalf("heights = files=%+v code=%+v agent=%+v", l.Files, l.Code, l.Agent)
+	}
+	if l.Files.Y != 0 || l.Agent.Y != l.Files.H || l.Code.Y != 0 {
+		t.Fatalf("positions = files=%+v code=%+v agent=%+v", l.Files, l.Code, l.Agent)
+	}
+	if l.Status.Y != bodyH || l.Status.H != 1 {
+		t.Fatalf("status = %+v", l.Status)
+	}
+}
+
+func TestComputeLayoutOddBodyGivesAgentExtraRow(t *testing.T) {
+	l := ComputeLayout(120, 42)
+	if l.Files.H != 20 || l.Agent.H != 21 || l.Files.H+l.Agent.H != 41 {
+		t.Fatalf("odd body split = files=%+v agent=%+v", l.Files, l.Agent)
+	}
+}
+
+func TestComputeLayoutNarrowStacksFilesCodeAgent(t *testing.T) {
+	l := ComputeLayout(70, 24)
+	if l.Files.X != 0 || l.Code.X != 0 || l.Agent.X != 0 {
+		t.Fatalf("narrow X positions = files=%+v code=%+v agent=%+v", l.Files, l.Code, l.Agent)
+	}
+	if l.Files.W != 70 || l.Code.W != 70 || l.Agent.W != 70 {
+		t.Fatalf("narrow widths = files=%+v code=%+v agent=%+v", l.Files, l.Code, l.Agent)
+	}
+	if !(l.Files.Y < l.Code.Y && l.Code.Y < l.Agent.Y) || l.Agent.Y+l.Agent.H != l.Status.Y {
+		t.Fatalf("narrow order = files=%+v code=%+v agent=%+v status=%+v", l.Files, l.Code, l.Agent, l.Status)
+	}
+}
+
+func TestComputeLayoutCapsLeftRail(t *testing.T) {
 	for _, size := range []struct{ width, height int }{{120, 40}, {80, 24}, {70, 24}} {
 		layout := ComputeLayout(size.width, size.height)
-		if layout.Tree.W > size.width/3 {
-			t.Fatalf("tree width %d exceeds one-third of %d", layout.Tree.W, size.width)
+		if size.width >= 80 && layout.Files.W > size.width/3 {
+			t.Fatalf("files width %d exceeds one-third of %d", layout.Files.W, size.width)
 		}
 		if layout.Status.Y+layout.Status.H != size.height {
 			t.Fatalf("status does not end at terminal bottom: %+v", layout.Status)
-		}
-		if size.width >= 80 && (layout.Tree.H != layout.Diff.H+layout.Analysis.H || layout.Diff.X != layout.Analysis.X) {
-			t.Fatalf("review stack not aligned: diff=%+v analysis=%+v", layout.Diff, layout.Analysis)
 		}
 	}
 }
