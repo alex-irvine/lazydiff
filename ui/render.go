@@ -33,34 +33,59 @@ func (m Model) View() string {
 }
 
 func (m Model) renderTree(r Rect) string {
-	lines := []string{lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render("CHANGED FILES")}
-	rows := m.tree.Rows()
-	if len(rows) == 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("(no changes)"))
+	title := delta.Truncate(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render("CHANGED FILES"), max(1, r.W-2))
+	lines := []string{title}
+	nodes := m.tree.Rows()
+	if len(nodes) == 0 {
+		empty := delta.Truncate(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("(no changes)"), max(1, r.W-2))
+		lines = append(lines, empty)
+		return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
 	}
-	for _, row := range rows {
-		id := row.ID()
+	contentH := r.H - 3
+	if contentH < 1 {
+		contentH = 1
+	}
+	m.tree.ClampScroll(contentH)
+	scroll := m.tree.scrollOffset
+	if scroll < 0 {
+		scroll = 0
+	}
+	if scroll >= len(nodes) {
+		scroll = max(0, len(nodes)-1)
+	}
+	visible := nodes[scroll:]
+	maxLines := contentH
+	if len(visible) > maxLines {
+		visible = visible[:maxLines]
+	}
+	maxW := max(1, r.W-2)
+	for _, node := range visible {
+		id := node.ID()
 		active := id == m.tree.selectedID
 		prefix := "  "
 		if active {
 			prefix = "▶ "
 		}
-		name := ""
-		if row.Hunk != nil {
-			name = row.Hunk.Header
-		} else if row.File != nil {
-			name = row.File.DisplayPath()
+		indent := strings.Repeat("  ", node.Level)
+		var icon string
+		if node.Hunk != nil {
+			icon = "  "
+		} else if node.File != nil {
+			icon = "📄 "
+		} else if node.Expanded {
+			icon = "📂 "
+		} else {
+			icon = "📁 "
 		}
-		if row.Depth > 0 {
-			name = "  " + name
-		}
+		fullLine := prefix + indent + icon + node.Label
+		truncated := delta.Truncate(fullLine, maxW)
 		color := lipgloss.Color("245")
 		if active {
 			color = lipgloss.Color("51")
-		} else if row.Hunk != nil {
+		} else if node.Hunk != nil {
 			color = lipgloss.Color("179")
 		}
-		lines = append(lines, lipgloss.NewStyle().Foreground(color).Render(prefix+delta.Truncate(name, max(1, r.W-5))))
+		lines = append(lines, lipgloss.NewStyle().Foreground(color).Render(truncated))
 	}
 	return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
 }
@@ -70,7 +95,8 @@ func (m Model) renderDiff(r Rect) string {
 	if file, _, ok := m.tree.Selected(); ok {
 		title = "DIFF / " + file.DisplayPath()
 	}
-	lines := []string{lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render(truncate(title, max(1, r.W-4)))}
+	titleRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render(title)
+	lines := []string{delta.Truncate(titleRendered, max(1, r.W-2))}
 	content := delta.Lines(m.diffText)
 	visible := max(0, r.H-3)
 	start := min(m.diffScroll, max(0, len(content)))
@@ -83,7 +109,8 @@ func (m Model) renderDiff(r Rect) string {
 func (m Model) renderAnalysis(r Rect) string {
 	tabs := "detail   overall   request log"
 	active := []string{"detail", "overall", "request log"}[m.activeTab]
-	lines := []string{lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51")).Render(tabs + "  [" + active + "]")}
+	tabRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51")).Render(tabs + "  [" + active + "]")
+	lines := []string{delta.Truncate(tabRendered, max(1, r.W-2))}
 	content := m.analysisLines()
 	start := min(m.analysisScroll, len(content))
 	visible := max(0, r.H-3)
@@ -136,7 +163,7 @@ func (m Model) statusLine() string {
 }
 
 func (m Model) helpText() string {
-	return "lazydiff keys\n\n[tab] focus  [j/k] navigate  [space] expand  [a] overall  [A] detail\n[c] cancel  [m] mode  [r] refresh  [g/G] scroll  [?] close help  [q] quit"
+	return "lazydiff keys\n\n[tab] focus  [j/k] navigate  [space] toggle expand  [h] collapse/parent  [l] expand/descend\n[a] overall  [A] detail  [c] cancel  [m] mode  [r] refresh  [g/G] scroll  [?] close help  [q] quit"
 }
 
 func box(r Rect, content string, focused bool) string {
@@ -160,13 +187,6 @@ func padLines(lines []string, height int) []string {
 		lines = lines[:height]
 	}
 	return lines
-}
-
-func truncate(s string, width int) string {
-	if len(s) <= width {
-		return s
-	}
-	return s[:width]
 }
 
 func min(a, b int) int {

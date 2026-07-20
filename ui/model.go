@@ -137,8 +137,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case refreshMsg, refreshTickMsg:
 		return m, m.refreshCmd()
 	case snapshotMsg:
-		m.applySnapshot(message.Snapshot)
-		return m, tea.Batch(m.renderSelectedCmd(), tickCmd())
+		changed := m.applySnapshot(message.Snapshot)
+		if changed {
+			return m, tea.Batch(m.renderSelectedCmd(), tickCmd())
+		}
+		return m, tickCmd()
 	case snapshotErrorMsg:
 		m.status = "git error: " + message.Err.Error()
 		return m, tickCmd()
@@ -188,13 +191,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) applySnapshot(snapshot git.Snapshot) {
+func (m *Model) applySnapshot(snapshot git.Snapshot) bool {
 	oldID := m.snapshot.ID
+	changed := oldID != snapshot.ID
 	m.snapshot, m.haveSnap = snapshot, true
 	m.tree.SetFiles(snapshot.Files)
-	m.diffScroll = 0
-	m.analysisScroll = 0
-	if oldID != "" && oldID != snapshot.ID {
+	if changed {
+		m.diffScroll = 0
+		m.analysisScroll = 0
 		for key, result := range m.results {
 			if resultKeySnapshot(key) == oldID {
 				result.Stale = true
@@ -202,6 +206,7 @@ func (m *Model) applySnapshot(snapshot git.Snapshot) {
 		}
 	}
 	m.status = fmt.Sprintf("%s · %d files", snapshot.Mode, len(snapshot.Files))
+	return changed
 }
 
 func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
@@ -213,6 +218,7 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case "up", "k":
 		if m.focus == FocusTree {
 			m.tree.Move(-1)
+			m.diffScroll = 0
 			return m, m.renderSelectedCmd()
 		}
 		if m.focus == FocusDiff && m.diffScroll > 0 {
@@ -224,6 +230,7 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case "down", "j":
 		if m.focus == FocusTree {
 			m.tree.Move(1)
+			m.diffScroll = 0
 			return m, m.renderSelectedCmd()
 		}
 		if m.focus == FocusDiff {
@@ -235,6 +242,19 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case " ":
 		if m.focus == FocusTree {
 			m.tree.Toggle()
+			m.diffScroll = 0
+			return m, m.renderSelectedCmd()
+		}
+	case "h":
+		if m.focus == FocusTree {
+			m.tree.CollapseOrParent()
+			m.diffScroll = 0
+			return m, m.renderSelectedCmd()
+		}
+	case "l":
+		if m.focus == FocusTree {
+			m.tree.ExpandOrDescend()
+			m.diffScroll = 0
 			return m, m.renderSelectedCmd()
 		}
 	case "a":
