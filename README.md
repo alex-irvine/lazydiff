@@ -119,51 +119,41 @@ delta --paging=never --color-only --width=<available width>
 
 Delta inherits Git configuration, including syntax themes, line numbers, side-by-side settings, and colors. If Delta is unavailable or fails, `lazydiff` displays raw diff and reports fallback status.
 
-## Install Releases
+## Installation
 
-Releases are published at [GitHub Releases](https://github.com/alex-irvine/lazydiff/releases). Install GitHub CLI (`gh`) first.
+### Prerequisites
 
-Linux amd64:
+- [git](https://git-scm.com) — Git repository operations
+- [GitHub CLI](https://cli.github.com) (`gh`) — release downloads and authentication
 
-```bash
-mkdir -p ~/.local/bin
-gh release download vX.Y.Z --repo alex-irvine/lazydiff --pattern 'lazydiff-linux-amd64' --output ~/.local/bin/lazydiff --clobber
-chmod +x ~/.local/bin/lazydiff
-```
-
-macOS Apple Silicon:
+### Linux
 
 ```bash
 mkdir -p ~/.local/bin
-gh release download vX.Y.Z --repo alex-irvine/lazydiff --pattern 'lazydiff-darwin-arm64' --output ~/.local/bin/lazydiff --clobber
+gh release download --repo alex-irvine/lazydiff --pattern 'lazydiff-linux-amd64' --output ~/.local/bin/lazydiff --clobber
 chmod +x ~/.local/bin/lazydiff
 ```
 
-macOS Intel uses `lazydiff-darwin-amd64`:
+### macOS
 
 ```bash
 mkdir -p ~/.local/bin
-gh release download vX.Y.Z --repo alex-irvine/lazydiff --pattern 'lazydiff-darwin-amd64' --output ~/.local/bin/lazydiff --clobber
+gh release download --repo alex-irvine/lazydiff --pattern 'lazydiff-darwin-arm64' --output ~/.local/bin/lazydiff --clobber
 chmod +x ~/.local/bin/lazydiff
 ```
 
-Windows PowerShell:
+Use `lazydiff-darwin-amd64` for Intel Macs.
+
+### Windows (PowerShell)
 
 ```powershell
-New-Item -ItemType Directory -Force "$HOME\.local\bin"
-gh release download vX.Y.Z --repo alex-irvine/lazydiff --pattern "lazydiff-windows-amd64.exe" --output "$HOME\.local\bin\lazydiff.exe" --clobber
+New-Item -ItemType Directory -Force -Path "$HOME\.local\bin" | Out-Null
+gh release download --repo alex-irvine/lazydiff --pattern "lazydiff-windows-amd64.exe" --output "$HOME\.local\bin\lazydiff.exe" --clobber
 ```
 
-Replace `vX.Y.Z` with release tag. Repeat install command with `--clobber` to upgrade.
+### Updating
 
-### Verify Checksums
-
-```bash
-gh release download vX.Y.Z --repo alex-irvine/lazydiff --pattern checksums.txt
-sha256sum -c checksums.txt
-```
-
-On macOS without `sha256sum`, use `shasum -a 256 -c checksums.txt`.
+Re-run the same install command for your OS. The `--clobber` flag overwrites the existing binary.
 
 ## Release Requirements
 

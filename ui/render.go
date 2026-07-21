@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/alex-irvine/lazydiff/delta"
+	"github.com/alex-irvine/lazydiff/version"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -184,7 +185,7 @@ func (m Model) statusLine() string {
 	if m.diffStyled {
 		deltaState = "delta active"
 	}
-	return fmt.Sprintf("mode: %s  %s  %s  [tab] focus  [a] overall  [A] detail  [m] mode  [?] help  [q] quit", m.mode, deltaState, m.status)
+	return fmt.Sprintf("mode: %s  %s  %s  %s  %s", m.mode, deltaState, m.status, "[tab] focus  [a] overall  [A] detail  [m] mode  [?] help  [q] quit", version.Current)
 }
 
 func (m Model) helpText() string {
