@@ -60,8 +60,9 @@ var allowedPlaceholders = map[string]struct{}{
 
 func Default() Config {
 	return Config{Agent: AgentConfig{
-		Provider:           "copilot",
-		Command:            "copilot",
+		Provider:           "generic",
+		Command:            "claude",
+		Args:               []string{"--model", "haiku-latest"},
 		ReadOnly:           true,
 		AllowExternalTools: false,
 		Prompts: PromptConfig{
@@ -126,8 +127,8 @@ func Load(path string) (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if c.Agent.Provider != "copilot" && c.Agent.Provider != "generic" {
-		return fmt.Errorf("agent provider %q is invalid; use copilot or generic", c.Agent.Provider)
+	if c.Agent.Provider != "copilot" && c.Agent.Provider != "generic" && c.Agent.Provider != "claude" {
+		return fmt.Errorf("agent provider %q is invalid; use copilot, generic, or claude", c.Agent.Provider)
 	}
 	if strings.TrimSpace(c.Agent.Command) == "" {
 		return errors.New("agent command must not be empty")

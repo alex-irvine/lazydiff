@@ -257,18 +257,30 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			m.diffScroll = 0
 			return m, m.renderSelectedCmd()
 		}
+	case "[":
+		if m.activeTab > 0 {
+			m.activeTab--
+		} else {
+			m.activeTab = RequestLogTab
+		}
+	case "]":
+		if m.activeTab < RequestLogTab {
+			m.activeTab++
+		} else {
+			m.activeTab = DetailTab
+		}
+	case "1":
+		m.focus = FocusTree
+	case "2":
+		m.focus = FocusDiff
+	case "3":
+		m.focus = FocusAnalysis
 	case "a":
 		m.activeTab = OverallTab
 		return m, m.startAnalysis(false)
 	case "A":
 		m.activeTab = DetailTab
 		return m, m.startAnalysis(true)
-	case "1":
-		m.activeTab = DetailTab
-	case "2":
-		m.activeTab = OverallTab
-	case "3":
-		m.activeTab = RequestLogTab
 	case "c":
 		m.cancelActive()
 	case "m":

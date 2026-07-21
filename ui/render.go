@@ -4,11 +4,19 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/alex-irvine/lazydiff/delta"
 	"github.com/alex-irvine/lazydiff/version"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+)
+
+var (
+	glamourRenderer *glamour.TermRenderer
+	glamourOnce     sync.Once
+	glamourWidth    int
 )
 
 func (m Model) View() string {
@@ -41,7 +49,7 @@ func (m Model) View() string {
 }
 
 func (m Model) renderTree(r Rect) string {
-	title := delta.Truncate(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render("CHANGED FILES"), max(1, r.W-2))
+	title := delta.Truncate(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render("[1] CHANGED FILES"), max(1, r.W-2))
 	lines := []string{title}
 	nodes := m.tree.Rows()
 	if len(nodes) == 0 {
@@ -103,7 +111,7 @@ func (m Model) renderDiff(r Rect) string {
 	if file, _, ok := m.tree.Selected(); ok {
 		title = "DIFF / " + file.DisplayPath()
 	}
-	titleRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render(title)
+	titleRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render("[2] " + title)
 	displayLines := []string{delta.Truncate(titleRendered, max(1, r.W-2))}
 	wrapped := wrapContent(delta.Lines(m.diffText), max(1, r.W-4))
 	visible := max(0, r.H-3)
@@ -115,9 +123,8 @@ func (m Model) renderDiff(r Rect) string {
 }
 
 func (m Model) renderAnalysis(r Rect) string {
-	tabs := "detail   overall   request log"
-	active := []string{"detail", "overall", "request log"}[m.activeTab]
-	tabRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51")).Render(tabs + "  [" + active + "]")
+	tabNames := []string{"detail", "overall", "request log"}
+	tabRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51")).Render("[3] " + tabNames[m.activeTab])
 	displayLines := []string{delta.Truncate(tabRendered, max(1, r.W-2))}
 	content := wrapContent(m.analysisLines(), max(1, r.W-4))
 	start := min(m.analysisScroll, len(content))
@@ -126,6 +133,32 @@ func (m Model) renderAnalysis(r Rect) string {
 		displayLines = append(displayLines, content[i])
 	}
 	return box(r, strings.Join(padLines(displayLines, r.H-2), "\n"), m.focus == FocusAnalysis)
+}
+
+func renderMarkdown(text string, width int) string {
+	if text == "" || width < 10 {
+		return text
+	}
+	text = strings.ReplaceAll(text, "\r", "")
+	if glamourWidth != width {
+		glamourOnce = sync.Once{}
+	}
+	var onceErr error
+	glamourOnce.Do(func() {
+		glamourRenderer, onceErr = glamour.NewTermRenderer(
+			glamour.WithStandardStyle("dark"),
+			glamour.WithWordWrap(width),
+		)
+		glamourWidth = width
+	})
+	if onceErr != nil {
+		return text
+	}
+	out, err := glamourRenderer.Render(text)
+	if err != nil {
+		return text
+	}
+	return out
 }
 
 func wrapContent(lines []string, maxW int) []string {
@@ -162,7 +195,15 @@ func (m Model) analysisLines() []string {
 	if result.Error != nil && result.Error != context.Canceled {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render("ERROR: "+result.Error.Error()))
 	}
-	lines = append(lines, strings.Split(ansi.Strip(result.Text), "\n")...)
+	text := result.Text
+	if text != "" && !result.Active && !result.Stale {
+		paneW := m.termW - 4
+		if m.termW >= 80 {
+			paneW = m.layout.Agent.W - 4
+		}
+		text = renderMarkdown(text, max(paneW, 10))
+	}
+	lines = append(lines, strings.Split(text, "\n")...)
 	return lines
 }
 
@@ -185,11 +226,11 @@ func (m Model) statusLine() string {
 	if m.diffStyled {
 		deltaState = "delta active"
 	}
-	return fmt.Sprintf("mode: %s  %s  %s  %s  %s", m.mode, deltaState, m.status, "[tab] focus  [a] overall  [A] detail  [m] mode  [?] help  [q] quit", version.Current)
+	return fmt.Sprintf("mode: %s  %s  %s  %s  %s", m.mode, deltaState, m.status, "[1-3] pane  [/] tab  [a] overall  [A] detail  [m] mode  [?] help  [q] quit", version.Current)
 }
 
 func (m Model) helpText() string {
-	return "lazydiff keys\n\n[tab] focus  [j/k] navigate  [space] toggle expand  [h] collapse/parent  [l] expand/descend\n[a] overall  [A] detail  [c] cancel  [m] mode  [r] refresh  [g/G] scroll  [?] close help  [q] quit"
+	return "lazydiff keys\n\n[1-3] pane  [tab] focus cycle  [j/k] navigate  [space] toggle expand  [h] collapse/parent  [l] expand/descend\n[/] tab  [a] overall  [A] detail  [c] cancel  [m] mode  [r] refresh  [g/G] scroll  [?] close help  [q] quit"
 }
 
 func box(r Rect, content string, focused bool) string {

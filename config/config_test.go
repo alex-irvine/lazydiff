@@ -21,7 +21,7 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Agent.Provider != "copilot" || cfg.Agent.Command != "copilot" || !cfg.Agent.ReadOnly {
+	if cfg.Agent.Provider != "generic" || cfg.Agent.Command != "claude" || len(cfg.Agent.Args) != 2 || cfg.Agent.Args[0] != "--model" || cfg.Agent.Args[1] != "haiku-latest" || !cfg.Agent.ReadOnly {
 		t.Fatalf("unexpected defaults: %+v", cfg.Agent)
 	}
 	if cfg.Agent.AllowExternalTools {
