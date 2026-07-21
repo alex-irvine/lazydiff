@@ -29,7 +29,14 @@ func (m Model) View() string {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, code)
 	}
 	status := lipgloss.NewStyle().Width(m.termW).Foreground(lipgloss.Color("241")).Render(m.statusLine())
-	return lipgloss.JoinVertical(lipgloss.Left, body, status)
+	result := lipgloss.JoinVertical(lipgloss.Left, body, status)
+	resultLines := strings.Split(result, "\n")
+	if len(resultLines) < m.termH {
+		resultLines = append(resultLines, make([]string, m.termH-len(resultLines))...)
+	} else if len(resultLines) > m.termH {
+		resultLines = resultLines[:m.termH]
+	}
+	return strings.Join(resultLines, "\n")
 }
 
 func (m Model) renderTree(r Rect) string {
@@ -96,28 +103,46 @@ func (m Model) renderDiff(r Rect) string {
 		title = "DIFF / " + file.DisplayPath()
 	}
 	titleRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render(title)
-	lines := []string{delta.Truncate(titleRendered, max(1, r.W-2))}
-	content := delta.Lines(m.diffText)
+	displayLines := []string{delta.Truncate(titleRendered, max(1, r.W-2))}
+	wrapped := wrapContent(delta.Lines(m.diffText), max(1, r.W-4))
 	visible := max(0, r.H-3)
-	start := min(m.diffScroll, max(0, len(content)))
-	for i := start; i < len(content) && i < start+visible; i++ {
-		lines = append(lines, delta.Truncate(content[i], max(1, r.W-4)))
+	start := min(m.diffScroll, max(0, len(wrapped)))
+	for i := start; i < len(wrapped) && i < start+visible; i++ {
+		displayLines = append(displayLines, wrapped[i])
 	}
-	return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusDiff)
+	return box(r, strings.Join(padLines(displayLines, r.H-2), "\n"), m.focus == FocusDiff)
 }
 
 func (m Model) renderAnalysis(r Rect) string {
 	tabs := "detail   overall   request log"
 	active := []string{"detail", "overall", "request log"}[m.activeTab]
 	tabRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51")).Render(tabs + "  [" + active + "]")
-	lines := []string{delta.Truncate(tabRendered, max(1, r.W-2))}
-	content := m.analysisLines()
+	displayLines := []string{delta.Truncate(tabRendered, max(1, r.W-2))}
+	content := wrapContent(m.analysisLines(), max(1, r.W-4))
 	start := min(m.analysisScroll, len(content))
 	visible := max(0, r.H-3)
 	for i := start; i < len(content) && i < start+visible; i++ {
-		lines = append(lines, delta.Truncate(content[i], max(1, r.W-4)))
+		displayLines = append(displayLines, content[i])
 	}
-	return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusAnalysis)
+	return box(r, strings.Join(padLines(displayLines, r.H-2), "\n"), m.focus == FocusAnalysis)
+}
+
+func wrapContent(lines []string, maxW int) []string {
+	if maxW < 1 {
+		maxW = 1
+	}
+	wrapped := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.ReplaceAll(line, "\t", "    ")
+		if ansi.StringWidth(line) > maxW {
+			for _, seg := range strings.Split(ansi.Hardwrap(line, maxW, false), "\n") {
+				wrapped = append(wrapped, delta.Truncate(seg, maxW))
+			}
+		} else {
+			wrapped = append(wrapped, delta.Truncate(line, maxW))
+		}
+	}
+	return wrapped
 }
 
 func (m Model) analysisLines() []string {
