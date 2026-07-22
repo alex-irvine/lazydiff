@@ -12,6 +12,7 @@ import (
 	"github.com/alex-irvine/lazydiff/diff"
 	"github.com/alex-irvine/lazydiff/git"
 	"github.com/alex-irvine/lazydiff/prompt"
+	"github.com/alex-irvine/lazydiff/version"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -69,6 +70,12 @@ type Model struct {
 	requestSeq     uint64
 	status         string
 	showHelp       bool
+	showUpdateModal bool
+	showUpdating    bool
+	updateVersion   string
+	updateError     error
+	updateManual    bool
+	updateStatus    string
 	send           func(tea.Msg)
 }
 
@@ -91,6 +98,13 @@ type analysisDoneMsg struct {
 }
 type refreshMsg struct{}
 type refreshTickMsg struct{}
+type updateResultMsg struct {
+	HasUpdate bool
+	Version   string
+	Error     error
+	Manual    bool
+}
+type updatePerformedMsg struct{ Error error }
 
 // Renderer is the small dependency required by Model; delta.Renderer satisfies it.
 type Renderer interface {
@@ -126,7 +140,9 @@ func (t *TeaModel) View() string { return t.model.View() }
 
 func (m *Model) SetSend(send func(tea.Msg)) { m.send = send }
 
-func (m Model) Init() tea.Cmd { return m.refreshCmd() }
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(m.refreshCmd(), checkUpdateCmd(true))
+}
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch message := msg.(type) {
@@ -185,6 +201,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			result.Stale = true
 		}
 		return m, nil
+	case updateResultMsg:
+		m.updateStatus = ""
+		if message.Error != nil {
+			if message.Manual {
+				m.status = "update check failed: " + message.Error.Error()
+			}
+			return m, nil
+		}
+		if message.HasUpdate {
+			m.updateVersion = message.Version
+			m.showUpdateModal = true
+		} else if message.Manual {
+			m.status = "already up to date (" + message.Version + ")"
+		}
+	case updatePerformedMsg:
+		m.showUpdating = false
+		if message.Error != nil {
+			m.status = "update failed: " + message.Error.Error()
+		} else {
+			m.status = "update complete! restart lazydiff"
+		}
 	case tea.KeyMsg:
 		return m.updateKey(message)
 	}
@@ -301,6 +338,28 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		if m.focus == FocusAnalysis {
 			m.analysisScroll = max(0, len(m.analysisLines())-m.layout.Agent.H+3)
+		}
+	case "u":
+		if m.showUpdateModal {
+			m.showUpdateModal = false
+			m.showUpdating = true
+			m.status = "downloading update " + m.updateVersion + "..."
+			return m, performUpdateCmd()
+		}
+		if m.showUpdating {
+			return m, nil
+		}
+		m.updateManual = true
+		m.updateStatus = "checking..."
+		return m, checkUpdateCmd(false)
+	case "n", "y":
+		if m.showUpdateModal {
+			m.showUpdateModal = false
+			if key.String() == "y" {
+				m.showUpdating = true
+				m.status = "downloading update " + m.updateVersion + "..."
+				return m, performUpdateCmd()
+			}
 		}
 	case "?":
 		m.showHelp = !m.showHelp
@@ -441,3 +500,20 @@ func resultKeySnapshot(key string) string {
 }
 
 func requestLogKey(snapshot string) string { return "request:" + snapshot + ":log" }
+
+func checkUpdateCmd(auto bool) tea.Cmd {
+	return func() tea.Msg {
+		hasUpdate, versionStr, err := version.CheckForUpdate()
+		if err != nil {
+			return updateResultMsg{Error: err, Manual: !auto}
+		}
+		return updateResultMsg{HasUpdate: hasUpdate, Version: versionStr, Manual: !auto}
+	}
+}
+
+func performUpdateCmd() tea.Cmd {
+	return func() tea.Msg {
+		err := version.PerformUpdate()
+		return updatePerformedMsg{Error: err}
+	}
+}

@@ -26,6 +26,14 @@ func (m Model) View() string {
 	if m.showHelp {
 		return lipgloss.Place(m.termW, m.termH, lipgloss.Center, lipgloss.Center, lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).Render(m.helpText()))
 	}
+	if m.showUpdateModal {
+		body := fmt.Sprintf("Update Available\n\nlazydiff %s is available\n(current: %s)\n\n[y] download & install   [n] dismiss", m.updateVersion, version.Current)
+		return lipgloss.Place(m.termW, m.termH, lipgloss.Center, lipgloss.Center, lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).Render(body))
+	}
+	if m.showUpdating {
+		body := fmt.Sprintf("Updating to lazydiff %s...", m.updateVersion)
+		return lipgloss.Place(m.termW, m.termH, lipgloss.Center, lipgloss.Center, lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).Render(body))
+	}
 	l := m.layout
 	files := m.renderTree(l.Files)
 	code := m.renderDiff(l.Code)
@@ -226,11 +234,17 @@ func (m Model) statusLine() string {
 	if m.diffStyled {
 		deltaState = "delta active"
 	}
-	return fmt.Sprintf("mode: %s  %s  %s  %s  %s", m.mode, deltaState, m.status, "[1-3] pane  [/] tab  [a] overall  [A] detail  [m] mode  [?] help  [q] quit", version.Current)
+	updateHint := ""
+	if m.showUpdateModal || m.showUpdating {
+		updateHint = ""
+	} else if m.updateVersion != "" {
+		updateHint = "  [u] update v" + m.updateVersion
+	}
+	return fmt.Sprintf("mode: %s  %s  %s  %s%s  %s", m.mode, deltaState, m.status, "[1-3] pane  [/] tab  [a] overall  [A] detail  [m] mode  [?] help  [q] quit", updateHint, version.Current)
 }
 
 func (m Model) helpText() string {
-	return "lazydiff keys\n\n[1-3] pane  [tab] focus cycle  [j/k] navigate  [space] toggle expand  [h] collapse/parent  [l] expand/descend\n[/] tab  [a] overall  [A] detail  [c] cancel  [m] mode  [r] refresh  [g/G] scroll  [?] close help  [q] quit"
+	return "lazydiff keys\n\n[1-3] pane  [tab] focus cycle  [j/k] navigate  [space] toggle expand  [h] collapse/parent  [l] expand/descend\n[/] tab  [a] overall  [A] detail  [c] cancel  [m] mode  [r] refresh  [u] update  [g/G] scroll  [?] close help  [q] quit"
 }
 
 func box(r Rect, content string, focused bool) string {
