@@ -394,7 +394,7 @@ func (m Model) renderSelectedCmd() tea.Cmd {
 	}
 	raw := m.snapshot.RawDiff
 	if hunk != nil {
-		raw = hunk.RawDiff()
+		raw = "--- a/" + file.DisplayPath() + "\n+++ b/" + file.DisplayPath() + "\n" + hunk.RawDiff()
 	} else if file.RawDiff() != "" {
 		raw = file.RawDiff()
 	}
