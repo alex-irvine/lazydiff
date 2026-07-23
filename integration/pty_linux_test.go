@@ -136,22 +136,30 @@ func writeExecutable(t *testing.T, path, content string) {
 
 func readUntil(t *testing.T, reader *os.File, marker string, timeout time.Duration) string {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	var output bytes.Buffer
-	buf := make([]byte, 4096)
-	for time.Now().Before(deadline) {
-		_ = reader.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-		n, err := reader.Read(buf)
-		if n > 0 {
-			output.Write(buf[:n])
-			if strings.Contains(output.String(), marker) {
-				return output.String()
+	result := make(chan string)
+	go func() {
+		var output bytes.Buffer
+		buf := make([]byte, 4096)
+		for {
+			n, err := reader.Read(buf)
+			if n > 0 {
+				output.Write(buf[:n])
+				if strings.Contains(output.String(), marker) {
+					result <- output.String()
+					return
+				}
+			}
+			if err != nil {
+				result <- output.String()
+				return
 			}
 		}
-		if err != nil {
-			continue
-		}
+	}()
+	select {
+	case res := <-result:
+		return res
+	case <-time.After(timeout):
+		t.Fatalf("timed out waiting for %q", marker)
+		return ""
 	}
-	t.Fatalf("timed out waiting for %q:\n%s", marker, output.String())
-	return output.String()
 }
