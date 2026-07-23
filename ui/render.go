@@ -244,7 +244,39 @@ func (m Model) statusLine() string {
 }
 
 func (m Model) helpText() string {
-	return "lazydiff keys\n\n[1-3] pane  [tab] focus cycle  [j/k] navigate  [space] toggle expand  [h] collapse/parent  [l] expand/descend\n[/] tab  [a] overall  [A] detail  [c] cancel  [m] mode  [r] refresh  [u] update  [g/G] scroll  [?] close help  [q] quit"
+	section := func(name string) string {
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51")).Render("  " + name)
+	}
+	key := func(k, desc string) string {
+		kStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("228")).Bold(true).Render(" " + k + " ")
+		return kStyle + " " + desc
+	}
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+
+	lines := []string{
+		section("Navigation"),
+		key("1 / 2 / 3", "Focus files / diff / analysis pane"),
+		key("tab", "Cycle focus forward"),
+		key("j / k", "Navigate tree / scroll diff"),
+		key("space", "Toggle expand directory"),
+		key("h / l", "Collapse / expand tree node"),
+		key("g / G", "Scroll to top / bottom"),
+		"",
+		section("Analysis"),
+		key("a / A", "Overall / detail review"),
+		key("[/]", "Switch analysis tab"),
+		key("c", "Cancel running analysis"),
+		"",
+		section("General"),
+		key("m", "Toggle diff mode"),
+		key("r", "Refresh snapshot"),
+		key("u", "Check for update"),
+		key("?", "Close this help"),
+		key("q", "Quit"),
+		"",
+		dim.Render("  lazydiff " + version.Current),
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 func box(r Rect, content string, focused bool) string {
