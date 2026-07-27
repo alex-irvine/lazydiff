@@ -76,6 +76,30 @@ func (r Repository) DefaultBranch(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("could not resolve default branch")
 }
 
+func (r Repository) CurrentBranch(ctx context.Context) (string, error) {
+	output, err := r.run(ctx, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolve current branch: %w", err)
+	}
+	branch := strings.TrimSpace(string(output))
+	if branch == "" {
+		return "", fmt.Errorf("current branch is empty")
+	}
+	return branch, nil
+}
+
+func (r Repository) RemoteURL(ctx context.Context, remote string) (string, error) {
+	output, err := r.run(ctx, "remote", "get-url", remote)
+	if err != nil {
+		return "", fmt.Errorf("resolve remote %q url: %w", remote, err)
+	}
+	url := strings.TrimSpace(string(output))
+	if url == "" {
+		return "", fmt.Errorf("remote %q url is empty", remote)
+	}
+	return url, nil
+}
+
 func runOutput(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	var stderr bytes.Buffer

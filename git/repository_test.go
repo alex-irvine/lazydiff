@@ -163,3 +163,30 @@ func TestDefaultBranchUsesRemoteHeadThenCandidates(t *testing.T) {
 		t.Fatalf("branch = %q, err = %v", branch, err)
 	}
 }
+
+func TestCurrentBranchTrimsOutput(t *testing.T) {
+	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{
+		"-C /repo rev-parse --abbrev-ref HEAD": []byte("feature/869d6rn69-thing\n"),
+	}}}
+	branch, err := r.CurrentBranch(context.Background())
+	if err != nil || branch != "feature/869d6rn69-thing" {
+		t.Fatalf("branch = %q, err = %v", branch, err)
+	}
+}
+
+func TestRemoteURLTrimsOutput(t *testing.T) {
+	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{
+		"-C /repo remote get-url origin": []byte("git@github.com:alex-irvine/lazydiff.git\n"),
+	}}}
+	url, err := r.RemoteURL(context.Background(), "origin")
+	if err != nil || url != "git@github.com:alex-irvine/lazydiff.git" {
+		t.Fatalf("url = %q, err = %v", url, err)
+	}
+}
+
+func TestRemoteURLWrapsFailure(t *testing.T) {
+	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{}}}
+	if _, err := r.RemoteURL(context.Background(), "origin"); err == nil {
+		t.Fatal("expected error for missing remote")
+	}
+}
