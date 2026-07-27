@@ -138,6 +138,18 @@ type commitDraftMsg struct {
 
 type commitResultMsg struct{ Err error }
 
+type prPrepMsg struct {
+	Ticket string
+	Prompt string
+	Err    error
+}
+
+type prDraftMsg struct {
+	Ticket string
+	Text   string
+	Err    error
+}
+
 // Renderer is the small dependency required by Model; delta.Renderer satisfies it.
 type Renderer interface {
 	Render(context.Context, string, int) delta.Result
@@ -280,6 +292,25 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.dialog = nil
 		m.status = "committed"
 		return m, m.refreshCmd()
+	case prPrepMsg:
+		if message.Err != nil {
+			m.status = "pr prep error: " + message.Err.Error()
+			return m, nil
+		}
+		m.dialog = NewActionDialog(PRDialog)
+		return m, m.runPRAgentCmd(message.Prompt, message.Ticket)
+	case prDraftMsg:
+		if m.dialog == nil || m.dialog.Kind != PRDialog {
+			return m, nil
+		}
+		text := message.Text
+		if message.Err == nil {
+			title, body := splitSubjectBody(text)
+			title = pr.FormatTitle(message.Ticket, title)
+			text = title + "\n\n" + body
+		}
+		m.dialog.SetDraft(text, message.Err)
+		return m, nil
 	case updatePerformedMsg:
 		m.showUpdating = false
 		if message.Error != nil {
@@ -429,6 +460,8 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		if m.mode == git.WorkingTree && len(m.tree.StagingPlan()) > 0 {
 			return m, m.startCommitCmd()
 		}
+	case "o":
+		return m, m.startPRCmd()
 	case "m":
 		m.mode = m.mode.Next()
 		return m, m.refreshCmd()
@@ -638,6 +671,60 @@ func (m Model) runCommitAgentCmd(renderedPrompt, ticket string) tea.Cmd {
 			}
 		})
 		return commitDraftMsg{Ticket: ticket, Text: output.String(), Err: err}
+	}
+}
+
+func (m Model) startPRCmd() tea.Cmd {
+	mutator, loader, cfg, templates := m.mutator, m.loader, m.cfg, m.templates
+	repoRoot := m.repo.Root
+	return func() tea.Msg {
+		ctx := context.Background()
+		branch, err := mutator.CurrentBranch(ctx)
+		if err != nil {
+			return prPrepMsg{Err: err}
+		}
+		base, err := mutator.DefaultBranch(ctx)
+		if err != nil {
+			return prPrepMsg{Err: err}
+		}
+		if branch == base {
+			return prPrepMsg{Err: fmt.Errorf("cannot open a pull request from the default branch %q", base)}
+		}
+		snapshot, err := loader.Snapshot(ctx, git.Branch)
+		if err != nil {
+			return prPrepMsg{Err: err}
+		}
+		ticket, err := pr.ExtractTicket(cfg.PR.TicketPattern, branch)
+		if err != nil {
+			return prPrepMsg{Err: err}
+		}
+		rendered, err := templates.RenderPRDescription(prompt.Context{
+			Repository: repoRoot,
+			Branch:     branch,
+			BaseBranch: base,
+			BranchDiff: snapshot.RawDiff,
+			Ticket:     ticket,
+		})
+		if err != nil {
+			return prPrepMsg{Err: err}
+		}
+		return prPrepMsg{Ticket: ticket, Prompt: rendered}
+	}
+}
+
+func (m Model) runPRAgentCmd(renderedPrompt, ticket string) tea.Cmd {
+	runner, repoRoot := m.runner, m.repo.Root
+	return func() tea.Msg {
+		var output strings.Builder
+		err := runner.Run(context.Background(), agent.Request{RepoRoot: repoRoot, Prompt: renderedPrompt}, func(event agent.Event) {
+			if event.Kind == agent.Output {
+				if output.Len() > 0 {
+					output.WriteByte('\n')
+				}
+				output.WriteString(event.Text)
+			}
+		})
+		return prDraftMsg{Ticket: ticket, Text: output.String(), Err: err}
 	}
 }
 

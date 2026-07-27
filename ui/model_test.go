@@ -536,6 +536,56 @@ func TestRegenerateCommitDialogRerunsStartCommitCmd(t *testing.T) {
 	}
 }
 
+func TestStartPRCmdBlocksOnDefaultBranch(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.mutator = &fakeMutator{currentBranch: "main", defaultBranch: "main"}
+	msg := model.startPRCmd()()
+	prep, ok := msg.(prPrepMsg)
+	if !ok || prep.Err == nil || !strings.Contains(prep.Err.Error(), "default branch") {
+		t.Fatalf("msg = %+v", msg)
+	}
+}
+
+func TestStartPRCmdPreparesPromptFromBranchDiff(t *testing.T) {
+	// Only the branch-mode snapshot is seeded: startPRCmd's own
+	// Snapshot(ctx, git.Branch) call is the only call fakeLoader will see
+	// in this test (no prior Init/refresh consumed an earlier entry).
+	loader := &fakeLoader{snapshots: []git.Snapshot{{ID: "branch-one", Mode: git.Branch, RawDiff: "branch-content\n"}}}
+	model := newTestModel(loader, &fakeRunner{})
+	model.mutator = &fakeMutator{currentBranch: "feature/869d6rn69-thing", defaultBranch: "main"}
+	msg := model.startPRCmd()()
+	prep, ok := msg.(prPrepMsg)
+	if !ok || prep.Err != nil {
+		t.Fatalf("msg = %+v", msg)
+	}
+	if prep.Ticket != "869d6rn69" || !strings.Contains(prep.Prompt, "branch-content") {
+		t.Fatalf("prep = %+v", prep)
+	}
+}
+
+func TestPRDraftMsgFormatsTitleWithTicket(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.dialog = NewActionDialog(PRDialog)
+	model, _ = model.Update(prDraftMsg{Ticket: "869d6rn69", Text: "Add OAuth login\nAdds login via OAuth provider."})
+	text := model.dialog.Text()
+	if !strings.HasPrefix(text, "CU-869d6rn69: Add OAuth login") {
+		t.Fatalf("dialog text = %q", text)
+	}
+}
+
+func TestOKeyStartsPRFlow(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.mutator = &fakeMutator{currentBranch: "feature/x", defaultBranch: "main"}
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	if cmd == nil {
+		t.Fatal("o did not start the pr flow")
+	}
+	msg := cmd()
+	if _, ok := msg.(prPrepMsg); !ok {
+		t.Fatalf("msg = %+v, want prPrepMsg", msg)
+	}
+}
+
 func TestSpaceTogglesCheckInsteadOfExpand(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	model.termW, model.termH = 120, 40
