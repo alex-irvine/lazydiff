@@ -11,6 +11,7 @@ import (
 	"github.com/alex-irvine/lazydiff/delta"
 	"github.com/alex-irvine/lazydiff/diff"
 	"github.com/alex-irvine/lazydiff/git"
+	"github.com/alex-irvine/lazydiff/pr"
 	"github.com/alex-irvine/lazydiff/prompt"
 	"github.com/alex-irvine/lazydiff/version"
 	tea "github.com/charmbracelet/bubbletea"
@@ -36,6 +37,20 @@ type SnapshotLoader interface {
 	Snapshot(context.Context, git.Mode) (git.Snapshot, error)
 }
 
+// Mutator is every git operation the commit/PR flows need beyond reading a
+// snapshot (which stays on SnapshotLoader). git.Repository satisfies this
+// once its StageFile/StagePatch/Commit/Push/CurrentBranch/RemoteURL methods
+// exist — no explicit declaration needed.
+type Mutator interface {
+	CurrentBranch(context.Context) (string, error)
+	DefaultBranch(context.Context) (string, error)
+	RemoteURL(context.Context, string) (string, error)
+	StageFile(ctx context.Context, oldPath, path string) error
+	StagePatch(ctx context.Context, patch string) error
+	Commit(ctx context.Context, message string) error
+	Push(ctx context.Context, remote, branch string) error
+}
+
 type analysisResult struct {
 	Text   string
 	Stale  bool
@@ -50,6 +65,9 @@ type Model struct {
 	renderer  Renderer
 	runner    agent.Runner
 	templates prompt.Templates
+	mutator   Mutator
+	opener    pr.Opener
+	dialog    *ActionDialog
 
 	snapshot       git.Snapshot
 	haveSnap       bool
@@ -111,9 +129,10 @@ type Renderer interface {
 	Render(context.Context, string, int) delta.Result
 }
 
-func NewModel(repo git.Repository, cfg config.Config, loader SnapshotLoader, renderer Renderer, runner agent.Runner, templates prompt.Templates) Model {
+func NewModel(repo git.Repository, cfg config.Config, loader SnapshotLoader, renderer Renderer, runner agent.Runner, templates prompt.Templates, mutator Mutator, opener pr.Opener) Model {
 	return Model{
 		repo: repo, cfg: cfg, loader: loader, renderer: renderer, runner: runner, templates: templates,
+		mutator: mutator, opener: opener,
 		mode: git.WorkingTree, tree: NewTree(nil), focus: FocusTree, activeTab: DetailTab,
 		results: make(map[string]*analysisResult), requests: make(map[string]context.CancelFunc),
 		status: "loading repository",
@@ -145,6 +164,9 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && m.dialog != nil {
+		return m.updateDialogKey(keyMsg)
+	}
 	switch message := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.termW, m.termH = message.Width, message.Height
@@ -246,6 +268,21 @@ func (m *Model) applySnapshot(snapshot git.Snapshot) bool {
 	return changed
 }
 
+func (m Model) updateDialogKey(key tea.KeyMsg) (Model, tea.Cmd) {
+	action, cmd := m.dialog.Update(key)
+	switch action {
+	case ActionCancel:
+		m.dialog = nil
+		return m, nil
+	case ActionConfirm, ActionRegenerate:
+		// Tasks 18-21 (commit/PR trigger, confirm, regenerate) fill this in;
+		// for now these are unreachable in practice because no key sets
+		// m.dialog to non-nil yet.
+		return m, nil
+	}
+	return m, cmd
+}
+
 func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	switch key.String() {
 	case "tab":
@@ -277,10 +314,12 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			m.analysisScroll++
 		}
 	case " ":
-		if m.focus == FocusTree {
-			m.tree.Toggle()
-			m.diffScroll = 0
-			return m, m.renderSelectedCmd()
+		if m.focus == FocusTree && m.mode == git.WorkingTree {
+			m.tree.ToggleCheck()
+		}
+	case "ctrl+a":
+		if m.focus == FocusTree && m.mode == git.WorkingTree {
+			m.tree.ToggleCheckAll()
 		}
 	case "h":
 		if m.focus == FocusTree {
@@ -318,7 +357,7 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case "A":
 		m.activeTab = DetailTab
 		return m, m.startAnalysis(true)
-	case "c":
+	case "x":
 		m.cancelActive()
 	case "m":
 		m.mode = m.mode.Next()

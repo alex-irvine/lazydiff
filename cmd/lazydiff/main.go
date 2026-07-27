@@ -12,6 +12,7 @@ import (
 	"github.com/alex-irvine/lazydiff/config"
 	"github.com/alex-irvine/lazydiff/delta"
 	"github.com/alex-irvine/lazydiff/git"
+	"github.com/alex-irvine/lazydiff/pr"
 	"github.com/alex-irvine/lazydiff/prompt"
 	"github.com/alex-irvine/lazydiff/ui"
 	"github.com/alex-irvine/lazydiff/version"
@@ -83,7 +84,7 @@ func runApp(ctx context.Context, configPath string, _ io.Reader, _, _ io.Writer)
 	default:
 		return fmt.Errorf("unsupported agent provider %q", cfg.Agent.Provider)
 	}
-	model := ui.NewTeaModel(ui.NewModel(repo, cfg, loader, delta.Renderer{Command: "delta"}, runner, templates))
+	model := ui.NewTeaModel(ui.NewModel(repo, cfg, loader, delta.Renderer{Command: "delta"}, runner, templates, repo, pr.NewOpener()))
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	model.SetSend(program.Send)
 	_, err = program.Run()

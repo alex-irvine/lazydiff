@@ -243,6 +243,52 @@ func (f *fakeRunner) Run(_ context.Context, request agent.Request, emit func(age
 	return nil
 }
 
+type fakeMutator struct {
+	currentBranch string
+	defaultBranch string
+	remoteURL     string
+	staged        []string
+	commits       []string
+	pushed        []string
+	err           error
+}
+
+func (f *fakeMutator) CurrentBranch(context.Context) (string, error) { return f.currentBranch, f.err }
+func (f *fakeMutator) DefaultBranch(context.Context) (string, error) { return f.defaultBranch, f.err }
+func (f *fakeMutator) RemoteURL(context.Context, string) (string, error) {
+	return f.remoteURL, f.err
+}
+
+func (f *fakeMutator) StageFile(_ context.Context, oldPath, path string) error {
+	f.staged = append(f.staged, "file:"+oldPath+":"+path)
+	return f.err
+}
+
+func (f *fakeMutator) StagePatch(_ context.Context, patch string) error {
+	f.staged = append(f.staged, "patch:"+patch)
+	return f.err
+}
+
+func (f *fakeMutator) Commit(_ context.Context, message string) error {
+	f.commits = append(f.commits, message)
+	return f.err
+}
+
+func (f *fakeMutator) Push(_ context.Context, remote, branch string) error {
+	f.pushed = append(f.pushed, remote+"/"+branch)
+	return f.err
+}
+
+type fakeOpener struct {
+	urls []string
+	err  error
+}
+
+func (f *fakeOpener) Open(_ context.Context, rawURL string) error {
+	f.urls = append(f.urls, rawURL)
+	return f.err
+}
+
 func makeSnapshot(id string) git.Snapshot {
 	files := testFiles()
 	files[0].Raw = "diff --git a/a.go b/a.go\n@@ -1 +1 @@\n-old\n+new\n"
@@ -261,7 +307,7 @@ func newTestModel(loader SnapshotLoader, runner agent.Runner) Model {
 	if err != nil {
 		panic(err)
 	}
-	return NewModel(git.Repository{Root: "/repo"}, cfg, loader, fakeRenderer{}, runner, templates)
+	return NewModel(git.Repository{Root: "/repo"}, cfg, loader, fakeRenderer{}, runner, templates, &fakeMutator{}, &fakeOpener{})
 }
 
 func TestModelRefreshAndAnalysisContext(t *testing.T) {
@@ -327,10 +373,73 @@ func TestModelCancellation(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("analysis command missing")
 	}
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	cmd()
 	if runner.cancelled == false {
 		t.Fatal("runner was not cancelled")
+	}
+}
+
+func TestSpaceTogglesCheckInsteadOfExpand(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.mode = git.WorkingTree
+	model.tree = NewTree(model.snapshot.Files)
+	model.focus = FocusTree
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	node := model.tree.flatNodes[0]
+	if model.tree.CheckState(node) != Checked {
+		t.Fatal("space did not check the file node")
+	}
+	if node.Expanded {
+		t.Fatal("space should no longer expand/collapse the node")
+	}
+}
+
+func TestCtrlACheckAllInWorkingTreeMode(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.mode = git.WorkingTree
+	model.tree = NewTree(model.snapshot.Files)
+	model.focus = FocusTree
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	for _, root := range model.tree.roots {
+		if model.tree.CheckState(root) != Checked {
+			t.Fatalf("ctrl+a did not check root %q", root.Label)
+		}
+	}
+}
+
+func TestXCancelsActiveAnalysis(t *testing.T) {
+	runner := &blockingRunner{}
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, runner)
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.termW, model.termH = 120, 40
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	cmd()
+	if runner.cancelled == false {
+		t.Fatal("x did not cancel the running analysis")
+	}
+}
+
+func TestDialogCapturesKeysBeforeTreeNavigation(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.tree.Toggle()
+	startCursor := model.tree.cursor
+	model.dialog = NewActionDialog(CommitDialog)
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if model.tree.cursor != startCursor {
+		t.Fatal("key reached tree navigation while dialog was open")
 	}
 }
 
