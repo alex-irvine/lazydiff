@@ -109,6 +109,41 @@ func TestToggleCheckAllChecksEveryLeafThenUnchecksAll(t *testing.T) {
 	}
 }
 
+func TestStagingPlanBucketsWholeFiles(t *testing.T) {
+	tree := NewTree(testFiles())
+	tree.ToggleCheck() // cursor 0 = a.go (collapsed), checks all its hunks
+	tree.Move(1)       // cursor -> b.go
+	tree.ToggleCheck()
+	plan := tree.StagingPlan()
+	if len(plan) != 2 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if plan[0].File.Path != "a.go" || len(plan[0].PartialHunks) != 0 {
+		t.Fatalf("a.go action = %+v", plan[0])
+	}
+	if plan[1].File.Path != "b.go" || len(plan[1].PartialHunks) != 0 {
+		t.Fatalf("b.go action = %+v", plan[1])
+	}
+}
+
+func TestStagingPlanPartialHunkSelection(t *testing.T) {
+	tree := NewTree(testFiles())
+	tree.Toggle() // expand a.go
+	tree.Move(1)  // cursor -> hunk:a:0
+	tree.ToggleCheck()
+	plan := tree.StagingPlan()
+	if len(plan) != 1 || plan[0].File.Path != "a.go" || len(plan[0].PartialHunks) != 1 || plan[0].PartialHunks[0].ID != "hunk:a:0" {
+		t.Fatalf("plan = %+v", plan)
+	}
+}
+
+func TestStagingPlanSkipsUncheckedFiles(t *testing.T) {
+	tree := NewTree(testFiles())
+	if plan := tree.StagingPlan(); len(plan) != 0 {
+		t.Fatalf("plan = %+v, want empty", plan)
+	}
+}
+
 func TestCheckStateSurvivesSetFilesRebuild(t *testing.T) {
 	tree := NewTree(testFiles())
 	tree.Toggle()

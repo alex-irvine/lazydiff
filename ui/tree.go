@@ -411,3 +411,43 @@ func (t *TreeModel) ToggleCheckAll() {
 		t.setChecked(root, !allChecked)
 	}
 }
+
+type StageAction struct {
+	File diff.File
+	// PartialHunks is empty for "stage the whole file"; when non-empty it
+	// carries the strict subset of File.Hunks that were checked.
+	PartialHunks []diff.Hunk
+}
+
+// StagingPlan returns one StageAction per file that has at least one checked
+// leaf, in file order.
+func (t *TreeModel) StagingPlan() []StageAction {
+	var plan []StageAction
+	for _, root := range t.roots {
+		t.collectStageActions(root, &plan)
+	}
+	return plan
+}
+
+func (t *TreeModel) collectStageActions(node *TreeNode, plan *[]StageAction) {
+	if node.File != nil && node.Hunk == nil {
+		switch t.CheckState(node) {
+		case Unchecked:
+			return
+		case Checked:
+			*plan = append(*plan, StageAction{File: *node.File})
+		case Indeterminate:
+			var partial []diff.Hunk
+			for _, hunk := range node.File.Hunks {
+				if t.checked[hunk.ID] {
+					partial = append(partial, hunk)
+				}
+			}
+			*plan = append(*plan, StageAction{File: *node.File, PartialHunks: partial})
+		}
+		return
+	}
+	for _, child := range node.Children {
+		t.collectStageActions(child, plan)
+	}
+}
