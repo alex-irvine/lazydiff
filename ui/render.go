@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/alex-irvine/lazydiff/delta"
+	"github.com/alex-irvine/lazydiff/git"
 	"github.com/alex-irvine/lazydiff/version"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -91,6 +92,17 @@ func (m Model) renderTree(r Rect) string {
 			prefix = "▶ "
 		}
 		indent := strings.Repeat("  ", node.Level)
+		checkbox := ""
+		if m.mode == git.WorkingTree {
+			switch m.tree.CheckState(node) {
+			case Checked:
+				checkbox = "[x] "
+			case Indeterminate:
+				checkbox = "[-] "
+			default:
+				checkbox = "[ ] "
+			}
+		}
 		var icon string
 		if node.Hunk != nil {
 			icon = "  "
@@ -101,7 +113,7 @@ func (m Model) renderTree(r Rect) string {
 		} else {
 			icon = "📁 "
 		}
-		fullLine := prefix + indent + icon + node.Label
+		fullLine := prefix + indent + checkbox + icon + node.Label
 		truncated := delta.Truncate(fullLine, maxW)
 		color := lipgloss.Color("245")
 		if active {

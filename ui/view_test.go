@@ -7,9 +7,39 @@ import (
 	"testing"
 
 	"github.com/alex-irvine/lazydiff/delta"
+	"github.com/alex-irvine/lazydiff/git"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
+
+func TestRenderTreeShowsCheckboxesInWorkingTreeMode(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.mode = git.WorkingTree
+	model.tree = NewTree(model.snapshot.Files)
+	model.tree.ToggleCheck()
+	out := model.renderTree(model.layout.Files)
+	if !strings.Contains(out, "[x]") {
+		t.Fatalf("expected a checked box in tree render:\n%s", out)
+	}
+}
+
+func TestRenderTreeHidesCheckboxesOutsideWorkingTreeMode(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.mode = git.Branch
+	model.tree = NewTree(model.snapshot.Files)
+	out := model.renderTree(model.layout.Files)
+	if strings.Contains(out, "[x]") || strings.Contains(out, "[ ]") || strings.Contains(out, "[-]") {
+		t.Fatalf("did not expect checkboxes outside working tree mode:\n%s", out)
+	}
+}
 
 func TestBoxWithDeltaContent(t *testing.T) {
 	rawDiff := "diff --git a/ui/render.go b/ui/render.go\nindex e11a12e..0809e9a 100644\n--- a/ui/render.go\n+++ b/ui/render.go\n@@ -96,28 +103,45 @@ func (m Model) renderDiff(r Rect) string {\n 	titleRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(\"245\")).Render(title)\n-	lines := []string{delta.Truncate(titleRendered, max(1, r.W-2))}\n-	content := delta.Lines(m.diffText)\n+	displayLines := []string{delta.Truncate(titleRendered, max(1, r.W-2))}\n+	wrapped := wrapContent(delta.Lines(m.diffText), max(1, r.W-4))\n 	visible := max(0, r.H-3)\n-	start := min(m.diffScroll, max(0, len(content)))\n-	for i := start; i < len(content) && i < start+visible; i++ {\n-		lines = append(lines, delta.Truncate(content[i], max(1, r.W-4)))\n+	start := min(m.diffScroll, max(0, len(wrapped)))\n+	for i := start; i < len(wrapped) && i < start+visible; i++ {\n+		displayLines = append(displayLines, wrapped[i])\n 	}\n-	return box(r, strings.Join(padLines(lines, r.H-2), \"\\n\"), m.focus == FocusDiff)\n+	return box(r, strings.Join(padLines(displayLines, r.H-2), \"\\n\"), m.focus == FocusDiff)\n }\n"
