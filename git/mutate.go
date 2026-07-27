@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // StageFile stages a whole file via `git add -A`, which handles
@@ -16,6 +17,16 @@ func (r Repository) StageFile(ctx context.Context, oldPath, path string) error {
 	args := append([]string{"add", "-A", "--"}, paths...)
 	if _, err := r.run(ctx, args...); err != nil {
 		return fmt.Errorf("stage %v: %w", paths, err)
+	}
+	return nil
+}
+
+// StagePatch applies patch to the index only (git apply --cached), leaving
+// the working tree untouched. patch must be a valid unified diff for
+// exactly one file, e.g. built by diff.BuildPatch.
+func (r Repository) StagePatch(ctx context.Context, patch string) error {
+	if _, err := r.runWithStdin(ctx, strings.NewReader(patch), "apply", "--cached"); err != nil {
+		return fmt.Errorf("apply patch: %w", err)
 	}
 	return nil
 }
