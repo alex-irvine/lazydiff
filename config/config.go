@@ -14,6 +14,7 @@ import (
 
 type Config struct {
 	Agent AgentConfig
+	PR    PRConfig
 }
 
 type AgentConfig struct {
@@ -26,12 +27,19 @@ type AgentConfig struct {
 }
 
 type PromptConfig struct {
-	Overall string
-	Detail  string
+	Overall       string
+	Detail        string
+	CommitMessage string
+	PRDescription string
+}
+
+type PRConfig struct {
+	TicketPattern string
 }
 
 type fileConfig struct {
 	Agent fileAgentConfig `toml:"agent"`
+	PR    filePRConfig    `toml:"pr"`
 }
 
 type fileAgentConfig struct {
@@ -44,8 +52,14 @@ type fileAgentConfig struct {
 }
 
 type filePromptConfig struct {
-	Overall *string `toml:"overall"`
-	Detail  *string `toml:"detail"`
+	Overall       *string `toml:"overall"`
+	Detail        *string `toml:"detail"`
+	CommitMessage *string `toml:"commit_message"`
+	PRDescription *string `toml:"pr_description"`
+}
+
+type filePRConfig struct {
+	TicketPattern *string `toml:"ticket_pattern"`
 }
 
 var placeholderPattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
@@ -56,20 +70,30 @@ var allowedPlaceholders = map[string]struct{}{
 	"overall_diff":  {},
 	"selection":     {},
 	"selected_diff": {},
+	"staged_diff":   {},
+	"branch_diff":   {},
+	"ticket":        {},
+	"branch":        {},
+	"base_branch":   {},
 }
 
 func Default() Config {
-	return Config{Agent: AgentConfig{
-		Provider:           "generic",
-		Command:            "claude",
-		Args:               []string{"--model", "haiku-latest"},
-		ReadOnly:           true,
-		AllowExternalTools: false,
-		Prompts: PromptConfig{
-			Overall: defaultOverallPrompt,
-			Detail:  defaultDetailPrompt,
+	return Config{
+		Agent: AgentConfig{
+			Provider:           "generic",
+			Command:            "claude",
+			Args:               []string{"--model", "haiku-latest"},
+			ReadOnly:           true,
+			AllowExternalTools: false,
+			Prompts: PromptConfig{
+				Overall:       defaultOverallPrompt,
+				Detail:        defaultDetailPrompt,
+				CommitMessage: defaultCommitMessagePrompt,
+				PRDescription: defaultPRDescriptionPrompt,
+			},
 		},
-	}}
+		PR: PRConfig{TicketPattern: defaultTicketPattern},
+	}
 }
 
 func ConfigPath() string {
@@ -120,6 +144,15 @@ func Load(path string) (Config, error) {
 	if overlay.Prompts.Detail != nil {
 		cfg.Agent.Prompts.Detail = *overlay.Prompts.Detail
 	}
+	if overlay.Prompts.CommitMessage != nil {
+		cfg.Agent.Prompts.CommitMessage = *overlay.Prompts.CommitMessage
+	}
+	if overlay.Prompts.PRDescription != nil {
+		cfg.Agent.Prompts.PRDescription = *overlay.Prompts.PRDescription
+	}
+	if file.PR.TicketPattern != nil {
+		cfg.PR.TicketPattern = *file.PR.TicketPattern
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -138,6 +171,15 @@ func (c Config) Validate() error {
 	}
 	if err := validateTemplate("detail", c.Agent.Prompts.Detail, "overall_diff", "selection", "selected_diff"); err != nil {
 		return err
+	}
+	if err := validateTemplate("commit_message", c.Agent.Prompts.CommitMessage, "staged_diff"); err != nil {
+		return err
+	}
+	if err := validateTemplate("pr_description", c.Agent.Prompts.PRDescription, "branch_diff"); err != nil {
+		return err
+	}
+	if _, err := regexp.Compile(c.PR.TicketPattern); err != nil {
+		return fmt.Errorf("pr.ticket_pattern is invalid: %w", err)
 	}
 	return nil
 }
@@ -198,3 +240,25 @@ Selected diff:
 {{selected_diff}}
 
 Explain why this file or hunk exists, how it relates to the wider change, and any risks or inconsistencies. Return concise Markdown. Do not modify files, run mutating commands, use network access, or use MCP tools.`
+
+const defaultTicketPattern = `(?:^|[-/_])([0-9a-z]{6,10})(?:[-_]|$)`
+
+const defaultCommitMessagePrompt = `You are writing a Git commit message in read-only mode; you do not run any commands.
+
+Repository: {{repository}}
+
+Staged diff:
+{{staged_diff}}
+
+Write a concise commit message: a short subject line (50 characters or fewer, no trailing period), a blank line, then a body explaining what changed and why. Return only the commit message text, nothing else.`
+
+const defaultPRDescriptionPrompt = `You are writing a GitHub pull request title and description in read-only mode; you do not run any commands.
+
+Repository: {{repository}}
+Branch: {{branch}}
+Base branch: {{base_branch}}
+
+Branch diff:
+{{branch_diff}}
+
+Write a concise PR title as the first line (no prefix, no trailing period), then a blank line, then a free-form Markdown description of what changed and why. Return only the title and description text, nothing else.`

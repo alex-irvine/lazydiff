@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -84,6 +85,67 @@ detail = "{{overall_diff}} {{selection}} {{selected_diff}}"
 `)
 	_, err := Load(path)
 	if err == nil || !strings.Contains(err.Error(), "placeholder") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadDefaultsIncludePRTicketPattern(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	re, err := regexp.Compile(cfg.PR.TicketPattern)
+	if err != nil {
+		t.Fatalf("default ticket_pattern does not compile: %v", err)
+	}
+	match := re.FindStringSubmatch("feature/869d6rn69-add-login")
+	if len(match) != 2 || match[1] != "869d6rn69" {
+		t.Fatalf("default ticket_pattern match = %v", match)
+	}
+	if !strings.Contains(cfg.Agent.Prompts.CommitMessage, "{{staged_diff}}") {
+		t.Fatal("default commit_message prompt missing staged_diff placeholder")
+	}
+	if !strings.Contains(cfg.Agent.Prompts.PRDescription, "{{branch_diff}}") {
+		t.Fatal("default pr_description prompt missing branch_diff placeholder")
+	}
+}
+
+func TestLoadOverlaysPRSection(t *testing.T) {
+	path := writeConfig(t, `[pr]
+ticket_pattern = "[A-Z]+-\\d+"
+
+[agent.prompts]
+commit_message = "{{staged_diff}}"
+pr_description = "{{branch_diff}}"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PR.TicketPattern != `[A-Z]+-\d+` {
+		t.Fatalf("ticket_pattern = %q", cfg.PR.TicketPattern)
+	}
+	if cfg.Agent.Prompts.CommitMessage != "{{staged_diff}}" || cfg.Agent.Prompts.PRDescription != "{{branch_diff}}" {
+		t.Fatalf("prompts = %+v", cfg.Agent.Prompts)
+	}
+}
+
+func TestLoadRejectsInvalidTicketPattern(t *testing.T) {
+	path := writeConfig(t, `[pr]
+ticket_pattern = "("
+`)
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "ticket_pattern") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadRejectsCommitMessageMissingRequiredPlaceholder(t *testing.T) {
+	path := writeConfig(t, `[agent.prompts]
+commit_message = "no placeholder here"
+`)
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "staged_diff") {
 		t.Fatalf("error = %v", err)
 	}
 }
