@@ -44,6 +44,15 @@ func (r Repository) Commit(ctx context.Context, message string) error {
 	return nil
 }
 
+// Push always passes -u; harmless when upstream already exists, so no
+// separate upstream-detection step is needed.
+func (r Repository) Push(ctx context.Context, remote, branch string) error {
+	if _, err := r.run(ctx, "push", "-u", remote, branch); err != nil {
+		return fmt.Errorf("push %s %s: %w", remote, branch, err)
+	}
+	return nil
+}
+
 func uniqueNonEmpty(values ...string) []string {
 	seen := make(map[string]bool, len(values))
 	var result []string

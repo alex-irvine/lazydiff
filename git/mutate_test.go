@@ -158,3 +158,19 @@ func TestCommitRejectsEmptyMessage(t *testing.T) {
 		t.Fatal("expected error for empty commit message")
 	}
 }
+
+func TestPushInvokesUpstreamPush(t *testing.T) {
+	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{
+		"-C /repo push -u origin feature/869d6rn69-thing": {},
+	}}}
+	if err := r.Push(context.Background(), "origin", "feature/869d6rn69-thing"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPushWrapsFailure(t *testing.T) {
+	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{}}}
+	if err := r.Push(context.Background(), "origin", "main"); err == nil || !strings.Contains(err.Error(), "push") {
+		t.Fatalf("err = %v", err)
+	}
+}
