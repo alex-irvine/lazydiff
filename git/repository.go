@@ -4,18 +4,26 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 )
 
 type CommandRunner interface {
 	Run(context.Context, string, ...string) ([]byte, error)
+	RunWithStdin(context.Context, io.Reader, string, ...string) ([]byte, error)
 }
 
 type execRunner struct{}
 
 func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	return cmd.Output()
+}
+
+func (execRunner) RunWithStdin(ctx context.Context, stdin io.Reader, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = stdin
 	return cmd.Output()
 }
 
@@ -45,6 +53,13 @@ func (r Repository) run(ctx context.Context, args ...string) ([]byte, error) {
 		r.runner = execRunner{}
 	}
 	return r.runner.Run(ctx, "git", append([]string{"-C", r.Root}, args...)...)
+}
+
+func (r Repository) runWithStdin(ctx context.Context, stdin io.Reader, args ...string) ([]byte, error) {
+	if r.runner == nil {
+		r.runner = execRunner{}
+	}
+	return r.runner.RunWithStdin(ctx, stdin, "git", append([]string{"-C", r.Root}, args...)...)
 }
 
 func (r Repository) DefaultBranch(ctx context.Context) (string, error) {

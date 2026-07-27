@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,6 +33,16 @@ func testRepo(t *testing.T) string {
 	runGit(t, dir, "add", "base.txt")
 	runGit(t, dir, "commit", "-m", "base")
 	return dir
+}
+
+func TestExecRunnerRunWithStdinPipesInput(t *testing.T) {
+	output, err := execRunner{}.RunWithStdin(context.Background(), strings.NewReader("hello\n"), "cat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != "hello\n" {
+		t.Fatalf("output = %q", output)
+	}
 }
 
 func TestOpenRejectsNonRepository(t *testing.T) {
@@ -128,6 +139,14 @@ type fakeRunner struct {
 }
 
 func (f fakeRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
+	key := strings.Join(args, " ")
+	if output, ok := f.outputs[key]; ok {
+		return output, nil
+	}
+	return nil, fmt.Errorf("missing fake command %q", key)
+}
+
+func (f fakeRunner) RunWithStdin(_ context.Context, _ io.Reader, _ string, args ...string) ([]byte, error) {
 	key := strings.Join(args, " ")
 	if output, ok := f.outputs[key]; ok {
 		return output, nil
