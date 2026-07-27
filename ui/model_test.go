@@ -380,6 +380,96 @@ func TestModelCancellation(t *testing.T) {
 	}
 }
 
+func makeStagedSnapshot(id string) git.Snapshot {
+	return git.Snapshot{ID: id, Mode: git.Staged, RawDiff: "staged-content\n"}
+}
+
+func TestStartCommitCmdStagesAndPreparesPrompt(t *testing.T) {
+	// Only the staged snapshot is seeded: this test calls startCommitCmd
+	// directly (no prior Init/refresh has consumed an earlier entry), and
+	// startCommitCmd's own Snapshot(ctx, git.Staged) call is the first (and
+	// only) call fakeLoader will see.
+	loader := &fakeLoader{snapshots: []git.Snapshot{makeStagedSnapshot("staged-one")}}
+	model := newTestModel(loader, &fakeRunner{})
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.tree.ToggleCheck() // checks a.go (cursor starts there)
+	mutator := &fakeMutator{currentBranch: "feature/869d6rn69-thing"}
+	model.mutator = mutator
+	msg := model.startCommitCmd()()
+	prep, ok := msg.(commitPrepMsg)
+	if !ok || prep.Err != nil {
+		t.Fatalf("msg = %+v", msg)
+	}
+	if prep.Ticket != "869d6rn69" {
+		t.Fatalf("ticket = %q", prep.Ticket)
+	}
+	if !strings.Contains(prep.Prompt, "staged-content") {
+		t.Fatalf("prompt = %q", prep.Prompt)
+	}
+	if len(mutator.staged) != 1 || mutator.staged[0] != "file::a.go" {
+		t.Fatalf("staged = %v", mutator.staged)
+	}
+}
+
+func TestRunCommitAgentCmdParsesOutput(t *testing.T) {
+	runner := &fakeRunner{events: []agent.Event{{Kind: agent.Output, Text: "Add OAuth login"}, {Kind: agent.Output, Text: "Adds login via OAuth provider."}}}
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, runner)
+	msg := model.runCommitAgentCmd("rendered prompt", "869d6rn69")()
+	draft, ok := msg.(commitDraftMsg)
+	if !ok || draft.Err != nil {
+		t.Fatalf("msg = %+v", msg)
+	}
+	if draft.Ticket != "869d6rn69" || !strings.Contains(draft.Text, "Add OAuth login") {
+		t.Fatalf("draft = %+v", draft)
+	}
+}
+
+func TestCommitDraftMsgPopulatesDialogWithTicketTrailer(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.dialog = NewActionDialog(CommitDialog)
+	model, _ = model.Update(commitDraftMsg{Ticket: "869d6rn69", Text: "Add OAuth login\nAdds login via OAuth provider."})
+	if !model.dialog.Ready {
+		t.Fatal("dialog not marked ready")
+	}
+	text := model.dialog.Text()
+	if !strings.Contains(text, "Add OAuth login") || !strings.Contains(text, "CU-869d6rn69") {
+		t.Fatalf("dialog text = %q", text)
+	}
+}
+
+func TestCKeyStartsCommitFlowWhenItemsChecked(t *testing.T) {
+	loader := &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one"), makeStagedSnapshot("staged-one")}}
+	model := newTestModel(loader, &fakeRunner{})
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.mode = git.WorkingTree
+	model.mutator = &fakeMutator{}
+	model.tree.ToggleCheck()
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if cmd == nil {
+		t.Fatal("c did not start the commit flow")
+	}
+	msg := cmd()
+	if _, ok := msg.(commitPrepMsg); !ok {
+		t.Fatalf("msg = %+v, want commitPrepMsg", msg)
+	}
+}
+
+func TestCKeyNoopWithNothingChecked(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.mode = git.WorkingTree
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if cmd != nil {
+		t.Fatal("c should be a no-op when nothing is checked")
+	}
+}
+
 func TestSpaceTogglesCheckInsteadOfExpand(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	model.termW, model.termH = 120, 40

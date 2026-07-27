@@ -124,6 +124,18 @@ type updateResultMsg struct {
 }
 type updatePerformedMsg struct{ Error error }
 
+type commitPrepMsg struct {
+	Ticket string
+	Prompt string
+	Err    error
+}
+
+type commitDraftMsg struct {
+	Ticket string
+	Text   string
+	Err    error
+}
+
 // Renderer is the small dependency required by Model; delta.Renderer satisfies it.
 type Renderer interface {
 	Render(context.Context, string, int) delta.Result
@@ -237,6 +249,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else if message.Manual {
 			m.status = "already up to date (" + message.Version + ")"
 		}
+	case commitPrepMsg:
+		if message.Err != nil {
+			m.status = "commit prep error: " + message.Err.Error()
+			return m, nil
+		}
+		m.dialog = NewActionDialog(CommitDialog)
+		return m, m.runCommitAgentCmd(message.Prompt, message.Ticket)
+	case commitDraftMsg:
+		if m.dialog == nil || m.dialog.Kind != CommitDialog {
+			return m, nil
+		}
+		text := message.Text
+		if message.Err == nil {
+			subject, body := splitSubjectBody(text)
+			if message.Ticket != "" {
+				body = strings.TrimRight(body, "\n") + "\n\nCU-" + message.Ticket
+			}
+			text = subject + "\n\n" + body
+		}
+		m.dialog.SetDraft(text, message.Err)
+		return m, nil
 	case updatePerformedMsg:
 		m.showUpdating = false
 		if message.Error != nil {
@@ -359,6 +392,10 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		return m, m.startAnalysis(true)
 	case "x":
 		m.cancelActive()
+	case "c":
+		if m.mode == git.WorkingTree && len(m.tree.StagingPlan()) > 0 {
+			return m, m.startCommitCmd()
+		}
 	case "m":
 		m.mode = m.mode.Next()
 		return m, m.refreshCmd()
@@ -512,6 +549,77 @@ func (m *Model) cancelActive() {
 		}
 	}
 	m.requests = make(map[string]context.CancelFunc)
+}
+
+func (m Model) startCommitCmd() tea.Cmd {
+	mutator, loader, cfg, templates, plan := m.mutator, m.loader, m.cfg, m.templates, m.tree.StagingPlan()
+	repoRoot := m.repo.Root
+	return func() tea.Msg {
+		ctx := context.Background()
+		for _, action := range plan {
+			var err error
+			if len(action.PartialHunks) == 0 {
+				err = mutator.StageFile(ctx, action.File.OldPath, action.File.Path)
+			} else {
+				err = mutator.StagePatch(ctx, diff.BuildPatch(action.File, action.PartialHunks))
+			}
+			if err != nil {
+				return commitPrepMsg{Err: err}
+			}
+		}
+		staged, err := loader.Snapshot(ctx, git.Staged)
+		if err != nil {
+			return commitPrepMsg{Err: err}
+		}
+		branch, err := mutator.CurrentBranch(ctx)
+		if err != nil {
+			return commitPrepMsg{Err: err}
+		}
+		ticket, err := pr.ExtractTicket(cfg.PR.TicketPattern, branch)
+		if err != nil {
+			return commitPrepMsg{Err: err}
+		}
+		rendered, err := templates.RenderCommitMessage(prompt.Context{
+			Repository: repoRoot,
+			Mode:       staged.Mode.String(),
+			StagedDiff: staged.RawDiff,
+			Ticket:     ticket,
+		})
+		if err != nil {
+			return commitPrepMsg{Err: err}
+		}
+		return commitPrepMsg{Ticket: ticket, Prompt: rendered}
+	}
+}
+
+func (m Model) runCommitAgentCmd(renderedPrompt, ticket string) tea.Cmd {
+	runner, repoRoot := m.runner, m.repo.Root
+	return func() tea.Msg {
+		var output strings.Builder
+		err := runner.Run(context.Background(), agent.Request{RepoRoot: repoRoot, Prompt: renderedPrompt}, func(event agent.Event) {
+			if event.Kind == agent.Output {
+				if output.Len() > 0 {
+					output.WriteByte('\n')
+				}
+				output.WriteString(event.Text)
+			}
+		})
+		return commitDraftMsg{Ticket: ticket, Text: output.String(), Err: err}
+	}
+}
+
+func splitSubjectBody(text string) (string, string) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", ""
+	}
+	lines := strings.SplitN(trimmed, "\n", 2)
+	subject := strings.TrimSpace(lines[0])
+	body := ""
+	if len(lines) > 1 {
+		body = strings.TrimSpace(lines[1])
+	}
+	return subject, body
 }
 
 func tickCmd() tea.Cmd {
