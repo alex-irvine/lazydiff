@@ -38,6 +38,7 @@ type TreeModel struct {
 	cursor       int
 	selectedID   string
 	scrollOffset int
+	checked      map[string]bool
 }
 
 func NewTree(files []diff.File) *TreeModel {
@@ -327,5 +328,86 @@ func (t *TreeModel) restoreSelection(id string) {
 			t.selectedID = id
 			return
 		}
+	}
+}
+
+type CheckState int
+
+const (
+	Unchecked CheckState = iota
+	Checked
+	Indeterminate
+)
+
+// CheckState reports whether every, some, or none of node's leaves (hunks,
+// or the file itself for a no-hunks file) are checked.
+func (t *TreeModel) CheckState(node *TreeNode) CheckState {
+	total, checked := t.countLeaves(node)
+	switch {
+	case total == 0, checked == 0:
+		return Unchecked
+	case checked == total:
+		return Checked
+	default:
+		return Indeterminate
+	}
+}
+
+func (t *TreeModel) countLeaves(node *TreeNode) (total, checked int) {
+	if node.IsLeaf() {
+		if t.checked[node.ID()] {
+			return 1, 1
+		}
+		return 1, 0
+	}
+	for _, child := range node.Children {
+		childTotal, childChecked := t.countLeaves(child)
+		total += childTotal
+		checked += childChecked
+	}
+	return total, checked
+}
+
+// ToggleCheck toggles the check state of the node under the cursor. Checking
+// a directory or a file with hunks cascades to every descendant leaf.
+func (t *TreeModel) ToggleCheck() {
+	if len(t.flatNodes) == 0 || t.cursor >= len(t.flatNodes) {
+		return
+	}
+	if t.checked == nil {
+		t.checked = make(map[string]bool)
+	}
+	node := t.flatNodes[t.cursor]
+	t.setChecked(node, t.CheckState(node) != Checked)
+}
+
+func (t *TreeModel) setChecked(node *TreeNode, value bool) {
+	if node.IsLeaf() {
+		t.checked[node.ID()] = value
+		return
+	}
+	for _, child := range node.Children {
+		t.setChecked(child, value)
+	}
+}
+
+// ToggleCheckAll checks every leaf in the tree if any are unchecked;
+// unchecks all if every leaf is already checked.
+func (t *TreeModel) ToggleCheckAll() {
+	if len(t.roots) == 0 {
+		return
+	}
+	if t.checked == nil {
+		t.checked = make(map[string]bool)
+	}
+	allChecked := true
+	for _, root := range t.roots {
+		if t.CheckState(root) != Checked {
+			allChecked = false
+			break
+		}
+	}
+	for _, root := range t.roots {
+		t.setChecked(root, !allChecked)
 	}
 }

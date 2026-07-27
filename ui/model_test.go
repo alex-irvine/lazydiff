@@ -61,6 +61,72 @@ func TestTreeEmptyState(t *testing.T) {
 	}
 }
 
+func TestToggleCheckOnHunkSetsOnlyThatHunk(t *testing.T) {
+	tree := NewTree(testFiles())
+	tree.Toggle() // expand a.go
+	tree.Move(1)  // cursor -> hunk:a:0
+	tree.ToggleCheck()
+	_, hunk, _ := tree.Selected()
+	if hunk == nil || hunk.ID != "hunk:a:0" {
+		t.Fatalf("expected cursor on hunk:a:0, got %+v", hunk)
+	}
+	node := tree.flatNodes[tree.cursor]
+	if tree.CheckState(node) != Checked {
+		t.Fatal("hunk not checked")
+	}
+	fileNode := tree.flatNodes[0]
+	if tree.CheckState(fileNode) != Indeterminate {
+		t.Fatalf("file state = %v, want Indeterminate", tree.CheckState(fileNode))
+	}
+}
+
+func TestToggleCheckOnFileChecksAllItsHunksThenUnchecks(t *testing.T) {
+	tree := NewTree(testFiles())
+	tree.ToggleCheck() // cursor starts on a.go's (collapsed) file node
+	fileNode := tree.flatNodes[0]
+	if tree.CheckState(fileNode) != Checked {
+		t.Fatalf("file state = %v, want Checked", tree.CheckState(fileNode))
+	}
+	tree.ToggleCheck()
+	if tree.CheckState(fileNode) != Unchecked {
+		t.Fatalf("file state = %v, want Unchecked", tree.CheckState(fileNode))
+	}
+}
+
+func TestToggleCheckAllChecksEveryLeafThenUnchecksAll(t *testing.T) {
+	tree := NewTree(testFiles())
+	tree.ToggleCheckAll()
+	for _, root := range tree.roots {
+		if tree.CheckState(root) != Checked {
+			t.Fatalf("root %q not fully checked", root.Label)
+		}
+	}
+	tree.ToggleCheckAll()
+	for _, root := range tree.roots {
+		if tree.CheckState(root) != Unchecked {
+			t.Fatalf("root %q not fully unchecked", root.Label)
+		}
+	}
+}
+
+func TestCheckStateSurvivesSetFilesRebuild(t *testing.T) {
+	tree := NewTree(testFiles())
+	tree.Toggle()
+	tree.Move(1) // cursor -> hunk:a:0
+	tree.ToggleCheck()
+	tree.SetFiles(testFiles())
+	// SetFiles already restores cursor/selection precisely (see
+	// TestTreePreservesSelectionAfterRefresh) — no extra navigation needed.
+	_, hunk, _ := tree.Selected()
+	if hunk == nil || hunk.ID != "hunk:a:0" {
+		t.Fatalf("expected hunk:a:0 selected, got %+v", hunk)
+	}
+	node := tree.flatNodes[tree.cursor]
+	if tree.CheckState(node) != Checked {
+		t.Fatal("checked state lost after SetFiles rebuild")
+	}
+}
+
 func TestComputeLayoutWideSplit(t *testing.T) {
 	l := ComputeLayout(120, 40)
 	bodyH := 39
