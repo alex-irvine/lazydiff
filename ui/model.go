@@ -136,6 +136,8 @@ type commitDraftMsg struct {
 	Err    error
 }
 
+type commitResultMsg struct{ Err error }
+
 // Renderer is the small dependency required by Model; delta.Renderer satisfies it.
 type Renderer interface {
 	Render(context.Context, string, int) delta.Result
@@ -270,6 +272,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.dialog.SetDraft(text, message.Err)
 		return m, nil
+	case commitResultMsg:
+		if message.Err != nil {
+			m.status = "commit failed: " + message.Err.Error()
+			return m, nil
+		}
+		m.dialog = nil
+		m.status = "committed"
+		return m, m.refreshCmd()
 	case updatePerformedMsg:
 		m.showUpdating = false
 		if message.Error != nil {
@@ -307,13 +317,36 @@ func (m Model) updateDialogKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case ActionCancel:
 		m.dialog = nil
 		return m, nil
-	case ActionConfirm, ActionRegenerate:
-		// Tasks 18-21 (commit/PR trigger, confirm, regenerate) fill this in;
-		// for now these are unreachable in practice because no key sets
-		// m.dialog to non-nil yet.
-		return m, nil
+	case ActionConfirm:
+		return m.confirmDialogCmd()
+	case ActionRegenerate:
+		return m.regenerateDialogCmd()
 	}
 	return m, cmd
+}
+
+func (m Model) confirmDialogCmd() (Model, tea.Cmd) {
+	if m.dialog == nil || !m.dialog.Ready || m.dialog.Err != nil {
+		return m, nil
+	}
+	text := m.dialog.Text()
+	switch m.dialog.Kind {
+	case CommitDialog:
+		mutator := m.mutator
+		return m, func() tea.Msg { return commitResultMsg{Err: mutator.Commit(context.Background(), text)} }
+	}
+	return m, nil
+}
+
+func (m Model) regenerateDialogCmd() (Model, tea.Cmd) {
+	if m.dialog == nil {
+		return m, nil
+	}
+	switch m.dialog.Kind {
+	case CommitDialog:
+		return m, m.startCommitCmd()
+	}
+	return m, nil
 }
 
 func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {

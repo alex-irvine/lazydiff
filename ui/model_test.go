@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -467,6 +468,71 @@ func TestCKeyNoopWithNothingChecked(t *testing.T) {
 	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 	if cmd != nil {
 		t.Fatal("c should be a no-op when nothing is checked")
+	}
+}
+
+func TestConfirmCommitDialogCallsMutatorCommit(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	mutator := &fakeMutator{}
+	model.mutator = mutator
+	model.dialog = NewActionDialog(CommitDialog)
+	model.dialog.SetDraft("subject\n\nbody", nil)
+	model, cmd := model.updateDialogKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if cmd == nil {
+		t.Fatal("confirm did not produce a command")
+	}
+	msg := cmd()
+	result, ok := msg.(commitResultMsg)
+	if !ok || result.Err != nil {
+		t.Fatalf("msg = %+v", msg)
+	}
+	if len(mutator.commits) != 1 || mutator.commits[0] != "subject\n\nbody" {
+		t.Fatalf("commits = %v", mutator.commits)
+	}
+}
+
+func TestCommitResultMsgClosesDialogAndRefreshes(t *testing.T) {
+	loader := &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one"), makeSnapshot("two")}}
+	model := newTestModel(loader, &fakeRunner{})
+	model.dialog = NewActionDialog(CommitDialog)
+	model, cmd := model.Update(commitResultMsg{})
+	if model.dialog != nil {
+		t.Fatal("dialog should close after a successful commit")
+	}
+	if cmd == nil {
+		t.Fatal("expected a refresh command after commit")
+	}
+}
+
+func TestCommitResultMsgErrorKeepsDialogOpen(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.dialog = NewActionDialog(CommitDialog)
+	model, _ = model.Update(commitResultMsg{Err: fmt.Errorf("commit hook rejected")})
+	if model.dialog == nil {
+		t.Fatal("dialog should stay open on commit failure")
+	}
+	if !strings.Contains(model.status, "commit hook rejected") {
+		t.Fatalf("status = %q", model.status)
+	}
+}
+
+func TestRegenerateCommitDialogRerunsStartCommitCmd(t *testing.T) {
+	loader := &fakeLoader{snapshots: []git.Snapshot{makeStagedSnapshot("staged-one")}}
+	model := newTestModel(loader, &fakeRunner{})
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.tree.ToggleCheck()
+	model.mutator = &fakeMutator{}
+	model.dialog = NewActionDialog(CommitDialog)
+	model.dialog.SetDraft("stale draft", nil)
+	model, cmd := model.updateDialogKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if cmd == nil {
+		t.Fatal("regenerate did not produce a command")
+	}
+	msg := cmd()
+	if _, ok := msg.(commitPrepMsg); !ok {
+		t.Fatalf("msg = %+v, want commitPrepMsg", msg)
 	}
 }
 
