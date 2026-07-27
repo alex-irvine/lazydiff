@@ -56,7 +56,12 @@ func runApp(ctx context.Context, configPath string, _ io.Reader, _, _ io.Writer)
 	if err != nil {
 		return err
 	}
-	templates, err := prompt.Parse(cfg.Agent.Prompts.Overall, cfg.Agent.Prompts.Detail)
+	templates, err := prompt.Parse(prompt.Sources{
+		Overall:       cfg.Agent.Prompts.Overall,
+		Detail:        cfg.Agent.Prompts.Detail,
+		CommitMessage: cfg.Agent.Prompts.CommitMessage,
+		PRDescription: cfg.Agent.Prompts.PRDescription,
+	})
 	if err != nil {
 		return err
 	}

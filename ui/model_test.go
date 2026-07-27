@@ -151,7 +151,12 @@ func makeSnapshot(id string) git.Snapshot {
 
 func newTestModel(loader SnapshotLoader, runner agent.Runner) Model {
 	cfg := config.Default()
-	templates, err := prompt.Parse(cfg.Agent.Prompts.Overall, cfg.Agent.Prompts.Detail)
+	templates, err := prompt.Parse(prompt.Sources{
+		Overall:       cfg.Agent.Prompts.Overall,
+		Detail:        cfg.Agent.Prompts.Detail,
+		CommitMessage: cfg.Agent.Prompts.CommitMessage,
+		PRDescription: cfg.Agent.Prompts.PRDescription,
+	})
 	if err != nil {
 		panic(err)
 	}
