@@ -150,6 +150,8 @@ type prDraftMsg struct {
 	Err    error
 }
 
+type prResultMsg struct{ Err error }
+
 // Renderer is the small dependency required by Model; delta.Renderer satisfies it.
 type Renderer interface {
 	Render(context.Context, string, int) delta.Result
@@ -311,6 +313,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.dialog.SetDraft(text, message.Err)
 		return m, nil
+	case prResultMsg:
+		if message.Err != nil {
+			m.status = "pr failed: " + message.Err.Error()
+			return m, nil
+		}
+		m.dialog = nil
+		m.status = "opened pull request in browser"
+		return m, nil
 	case updatePerformedMsg:
 		m.showUpdating = false
 		if message.Error != nil {
@@ -365,6 +375,9 @@ func (m Model) confirmDialogCmd() (Model, tea.Cmd) {
 	case CommitDialog:
 		mutator := m.mutator
 		return m, func() tea.Msg { return commitResultMsg{Err: mutator.Commit(context.Background(), text)} }
+	case PRDialog:
+		title, body := splitSubjectBody(text)
+		return m, m.confirmPRCmd(title, body)
 	}
 	return m, nil
 }
@@ -376,8 +389,40 @@ func (m Model) regenerateDialogCmd() (Model, tea.Cmd) {
 	switch m.dialog.Kind {
 	case CommitDialog:
 		return m, m.startCommitCmd()
+	case PRDialog:
+		return m, m.startPRCmd()
 	}
 	return m, nil
+}
+
+func (m Model) confirmPRCmd(title, body string) tea.Cmd {
+	mutator, opener := m.mutator, m.opener
+	return func() tea.Msg {
+		ctx := context.Background()
+		branch, err := mutator.CurrentBranch(ctx)
+		if err != nil {
+			return prResultMsg{Err: err}
+		}
+		if err := mutator.Push(ctx, "origin", branch); err != nil {
+			return prResultMsg{Err: err}
+		}
+		remoteURL, err := mutator.RemoteURL(ctx, "origin")
+		if err != nil {
+			return prResultMsg{Err: err}
+		}
+		base, err := mutator.DefaultBranch(ctx)
+		if err != nil {
+			return prResultMsg{Err: err}
+		}
+		compareURL, err := pr.CompareURL(remoteURL, base, branch, title, body)
+		if err != nil {
+			return prResultMsg{Err: err}
+		}
+		if err := opener.Open(ctx, compareURL); err != nil {
+			return prResultMsg{Err: err}
+		}
+		return prResultMsg{}
+	}
 }
 
 func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {

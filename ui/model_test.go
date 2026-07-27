@@ -586,6 +586,71 @@ func TestOKeyStartsPRFlow(t *testing.T) {
 	}
 }
 
+func TestConfirmPRDialogPushesBuildsURLAndOpens(t *testing.T) {
+	loader := &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}
+	model := newTestModel(loader, &fakeRunner{})
+	mutator := &fakeMutator{currentBranch: "feature/869d6rn69-thing", defaultBranch: "main", remoteURL: "git@github.com:alex-irvine/lazydiff.git"}
+	opener := &fakeOpener{}
+	model.mutator = mutator
+	model.opener = opener
+	model.dialog = NewActionDialog(PRDialog)
+	model.dialog.SetDraft("CU-869d6rn69: Add OAuth login\n\nAdds login via OAuth provider.", nil)
+	model, cmd := model.updateDialogKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if cmd == nil {
+		t.Fatal("confirm did not produce a command")
+	}
+	msg := cmd()
+	result, ok := msg.(prResultMsg)
+	if !ok || result.Err != nil {
+		t.Fatalf("msg = %+v", msg)
+	}
+	if len(mutator.pushed) != 1 || mutator.pushed[0] != "origin/feature/869d6rn69-thing" {
+		t.Fatalf("pushed = %v", mutator.pushed)
+	}
+	if len(opener.urls) != 1 || !strings.Contains(opener.urls[0], "alex-irvine/lazydiff/compare/main...feature/869d6rn69-thing") {
+		t.Fatalf("opened urls = %v", opener.urls)
+	}
+}
+
+func TestPRResultMsgClosesDialogOnSuccess(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.dialog = NewActionDialog(PRDialog)
+	model, _ = model.Update(prResultMsg{})
+	if model.dialog != nil {
+		t.Fatal("dialog should close after a successful PR open")
+	}
+}
+
+func TestPRResultMsgErrorKeepsDialogOpen(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.dialog = NewActionDialog(PRDialog)
+	model, _ = model.Update(prResultMsg{Err: fmt.Errorf("push rejected")})
+	if model.dialog == nil {
+		t.Fatal("dialog should stay open on push failure")
+	}
+	if !strings.Contains(model.status, "push rejected") {
+		t.Fatalf("status = %q", model.status)
+	}
+}
+
+func TestRegeneratePRDialogRerunsStartPRCmd(t *testing.T) {
+	// Only the branch-mode snapshot is seeded, matching startPRCmd's single
+	// Snapshot(ctx, git.Branch) call triggered by the regenerate action.
+	loader := &fakeLoader{snapshots: []git.Snapshot{{ID: "b", Mode: git.Branch, RawDiff: "x"}}}
+	model := newTestModel(loader, &fakeRunner{})
+	model.mutator = &fakeMutator{currentBranch: "feature/x", defaultBranch: "main"}
+	model.dialog = NewActionDialog(PRDialog)
+	model.dialog.SetDraft("stale draft", nil)
+	model, cmd := model.updateDialogKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if cmd == nil {
+		t.Fatal("regenerate did not produce a command")
+	}
+	msg := cmd()
+	if _, ok := msg.(prPrepMsg); !ok {
+		t.Fatalf("msg = %+v, want prPrepMsg", msg)
+	}
+}
+
 func TestSpaceTogglesCheckInsteadOfExpand(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	model.termW, model.termH = 120, 40
