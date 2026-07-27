@@ -119,3 +119,42 @@ func TestStagePatchRejectsInvalidPatch(t *testing.T) {
 		t.Fatal("expected error for invalid patch")
 	}
 }
+
+func TestCommitCreatesCommitFromStagedChanges(t *testing.T) {
+	dir := testRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.StageFile(context.Background(), "", "new.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Commit(context.Background(), "subject line\n\nbody line\n\nCU-869d6rn69"); err != nil {
+		t.Fatal(err)
+	}
+	log := runGit(t, dir, "log", "-1", "--pretty=%B")
+	if !strings.Contains(log, "subject line") || !strings.Contains(log, "CU-869d6rn69") {
+		t.Fatalf("commit message = %q", log)
+	}
+	working, err := r.Snapshot(context.Background(), WorkingTree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(working.Files) != 0 {
+		t.Fatalf("expected clean working tree after commit, got %+v", working.Files)
+	}
+}
+
+func TestCommitRejectsEmptyMessage(t *testing.T) {
+	dir := testRepo(t)
+	r, err := Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Commit(context.Background(), "   "); err == nil {
+		t.Fatal("expected error for empty commit message")
+	}
+}

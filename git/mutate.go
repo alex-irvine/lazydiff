@@ -31,6 +31,19 @@ func (r Repository) StagePatch(ctx context.Context, patch string) error {
 	return nil
 }
 
+// Commit creates a commit from whatever is currently staged, with message
+// piped to `git commit --file -` (avoids shell-escaping issues with
+// multi-line messages).
+func (r Repository) Commit(ctx context.Context, message string) error {
+	if strings.TrimSpace(message) == "" {
+		return fmt.Errorf("commit message must not be empty")
+	}
+	if _, err := r.runWithStdin(ctx, strings.NewReader(message), "commit", "--file", "-"); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
 func uniqueNonEmpty(values ...string) []string {
 	seen := make(map[string]bool, len(values))
 	var result []string
