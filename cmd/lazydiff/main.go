@@ -79,6 +79,8 @@ func runApp(ctx context.Context, configPath string, _ io.Reader, _, _ io.Writer)
 	switch cfg.Agent.Provider {
 	case "copilot":
 		runner = agent.NewCopilot(cfg.Agent.Command, cfg.Agent.Args, cfg.Agent.ReadOnly, cfg.Agent.AllowExternalTools)
+	case "opencode":
+		runner = agent.NewOpenCode(cfg.Agent.Command, cfg.Agent.Args, cfg.Agent.ReadOnly, cfg.Agent.AllowExternalTools)
 	case "generic", "claude":
 		runner = agent.NewGeneric(cfg.Agent.Command, cfg.Agent.Args)
 	default:

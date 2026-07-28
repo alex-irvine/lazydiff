@@ -1,6 +1,6 @@
 # lazydiff
 
-Terminal Git diff reviewer (Go 1.24 + Bubble Tea) that shells out to an AI CLI (default provider: `generic`/`claude`, see drift note below) to explain diffs, and can stage/commit/push and open a GitHub PR. The AI agent is always read-only; **all git mutations happen in Go code**, never in the agent process.
+Terminal Git diff reviewer (Go 1.24 + Bubble Tea) that shells out to an AI CLI (default provider: `opencode`, see drift note below) to explain diffs, and can stage/commit/push and open a GitHub PR. The AI agent is always read-only; **all git mutations happen in Go code**, never in the agent process.
 
 ## Build, test, verify
 
@@ -28,7 +28,7 @@ Dependency direction (leaf → root): `diff` → `git` → `ui`; `agent`, `confi
 |---|---|
 | `diff` | Pure unified-diff parser/model (`File`, `Hunk`) plus `BuildPatch` (slices a sub-patch from selected hunks for partial staging, git-add-p style). No git CLI calls. |
 | `git` | The **only** package that shells out to `git`. `Repository` (via `git.Open`) exposes reads (`Snapshot`, `CurrentBranch`, `DefaultBranch`, `RemoteURL`) and mutations (`StageFile`, `StagePatch`, `Commit`, `Push`), all routed through the `CommandRunner` interface — the seam faked in tests. |
-| `agent` | Runs the external AI CLI via the `Runner` interface. `Generic` pipes the prompt over stdin, streams stdout/stderr line-by-line as `Event`s. `Copilot` wraps `Generic`, writing the prompt to a temp file and adding read-only/no-external-tool CLI flags. |
+| `agent` | Runs the external AI CLI via the `Runner` interface. `Generic` pipes the prompt over stdin, streams stdout/stderr line-by-line as `Event`s. `Copilot` wraps `Generic`, writing the prompt to a temp file and adding read-only/no-external-tool CLI flags. `OpenCode` wraps `Generic`, adding `--pure` (when external tools disallowed) and `--auto` (non-interactive) flags. |
 | `config` | Loads/validates `$XDG_CONFIG_HOME/lazydiff/config.toml` (TOML), overlaid onto `Default()`. |
 | `prompt` | Compiles the 4 prompt templates (overall/detail/commit_message/pr_description) from `config` into `text/template`s, renders against a `Context`. |
 | `delta` | Shells out to `delta` for ANSI-colored diff display; falls back to raw diff text on any failure (missing binary, non-zero exit). Display-only — raw diff is always what's parsed and sent to the agent. |
@@ -60,7 +60,7 @@ Every git/agent operation is a `tea.Cmd` (closure over value-copied deps, never 
 
 ## Documentation drift (trust code over README here)
 
-- README's example config shows `provider = "copilot"` as the default; the actual compiled-in default (`config.Default()`, `config/config.go:80-97`) is `provider = "generic"`, `command = "claude"`, `args = ["--model", "haiku-latest"]`.
+- README's example config shows `provider = "copilot"` as the default; the actual compiled-in default (`config.Default()`, `config/config.go:80-97`) is `provider = "opencode"`, `command = "opencode"`, `args = ["run"]`.
 - README's "Controls" table is stale versus `ui/render.go`'s `helpText()`/`statusLine()` and the real `updateKey` switch in `ui/model.go`: `space` toggles a staging checkbox (expand/collapse is `h`/`l`), `c` starts the commit flow (cancel is `x`), and `ctrl+a` (check-all) / `o` (PR) are missing from the README table entirely.
 
 ## Design docs
