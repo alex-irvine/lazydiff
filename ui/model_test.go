@@ -651,6 +651,25 @@ func TestRegeneratePRDialogRerunsStartPRCmd(t *testing.T) {
 	}
 }
 
+func TestHelpTextReflectsNewKeybindings(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	help := model.helpText()
+	for _, want := range []string{
+		"Toggle check for staging",
+		"Check / uncheck all",
+		"Stage checked items and commit",
+		"Push and open pull request",
+		"Cancel running analysis",
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("help text missing %q:\n%s", want, help)
+		}
+	}
+	if strings.Contains(help, "Toggle expand directory") {
+		t.Fatal("help text still references the removed space binding")
+	}
+}
+
 func TestSpaceTogglesCheckInsteadOfExpand(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	model.termW, model.termH = 120, 40

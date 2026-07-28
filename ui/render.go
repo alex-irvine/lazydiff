@@ -252,7 +252,7 @@ func (m Model) statusLine() string {
 	} else if m.updateVersion != "" {
 		updateHint = "  [u] update v" + m.updateVersion
 	}
-	return fmt.Sprintf("mode: %s  %s  %s  %s%s  %s", m.mode, deltaState, m.status, "[1-3] pane  [/] tab  [a] overall  [A] detail  [m] mode  [?] help  [q] quit", updateHint, version.Current)
+	return fmt.Sprintf("mode: %s  %s  %s  %s%s  %s", m.mode, deltaState, m.status, "[1-3] pane  [space] check  [c] commit  [o] PR  [?] help  [q] quit", updateHint, version.Current)
 }
 
 func (m Model) helpText() string {
@@ -270,14 +270,19 @@ func (m Model) helpText() string {
 		key("1 / 2 / 3", "Focus files / diff / analysis pane"),
 		key("tab", "Cycle focus forward"),
 		key("j / k", "Navigate tree / scroll diff"),
-		key("space", "Toggle expand directory"),
 		key("h / l", "Collapse / expand tree node"),
 		key("g / G", "Scroll to top / bottom"),
+		"",
+		section("Staging"),
+		key("space", "Toggle check for staging (working tree mode)"),
+		key("ctrl+a", "Check / uncheck all"),
+		key("c", "Stage checked items and commit"),
+		key("o", "Push and open pull request"),
 		"",
 		section("Analysis"),
 		key("a / A", "Overall / detail review"),
 		key("[/]", "Switch analysis tab"),
-		key("c", "Cancel running analysis"),
+		key("x", "Cancel running analysis"),
 		"",
 		section("General"),
 		key("m", "Toggle diff mode"),
