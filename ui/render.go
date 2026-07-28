@@ -327,7 +327,7 @@ func (m Model) helpText() string {
 		key("m", "Toggle diff mode"),
 		key("r", "Refresh snapshot"),
 		key("u", "Check for update"),
-		key("?", "Close this help"),
+		key("? / esc", "Close this help"),
 		key("q", "Quit"),
 		"",
 		dim.Render("  lazydiff " + version.Current),

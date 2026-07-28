@@ -651,6 +651,26 @@ func TestRegeneratePRDialogRerunsStartPRCmd(t *testing.T) {
 	}
 }
 
+func TestEscClosesHelpModal(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	if !model.showHelp {
+		t.Fatal("? did not open help modal")
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.showHelp {
+		t.Fatal("esc did not close help modal")
+	}
+}
+
+func TestEscIsNoopWhenHelpNotShowing(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.showHelp {
+		t.Fatal("esc should not open help modal")
+	}
+}
+
 func TestHelpTextReflectsNewKeybindings(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	help := model.helpText()

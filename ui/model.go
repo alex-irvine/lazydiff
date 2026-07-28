@@ -550,6 +550,10 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	case "?":
 		m.showHelp = !m.showHelp
+	case "esc":
+		if m.showHelp {
+			m.showHelp = false
+		}
 	case "q", "ctrl+c":
 		m.cancelActive()
 		return m, tea.Quit
