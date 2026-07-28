@@ -118,6 +118,92 @@ func TestPTYAnalysisStreamsAndNarrowLayout(t *testing.T) {
 	_ = cmd.Wait()
 }
 
+func TestPTYCheckFileCommitFlow(t *testing.T) {
+	fixture := newFixture(t)
+	cmd := exec.Command(fixture.binary, "-config", fixture.config)
+	cmd.Dir = fixture.root
+	cmd.Env = append(os.Environ(), "PATH="+filepath.Dir(fixture.delta)+":"+os.Getenv("PATH"))
+	terminal, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer terminal.Close()
+	if err := pty.Setsize(terminal, &pty.Winsize{Cols: 120, Rows: 40}); err != nil {
+		t.Fatal(err)
+	}
+	_ = readUntil(t, terminal, "delta-output", 3*time.Second)
+	if _, err := terminal.Write([]byte(" ")); err != nil { // check main.go (cursor starts there)
+		t.Fatal(err)
+	}
+	if _, err := terminal.Write([]byte("c")); err != nil { // stage + generate commit message
+		t.Fatal(err)
+	}
+	output := readUntil(t, terminal, "analysis-output", 5*time.Second)
+	if !strings.Contains(output, "analysis-output") {
+		t.Fatalf("commit dialog did not show the generated draft:\n%s", output)
+	}
+	if _, err := terminal.Write([]byte{19}); err != nil { // ctrl+s
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond) // let the commit actually land before quitting
+	if _, err := terminal.Write([]byte("q")); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	log := runOutput(t, fixture.root, "log", "-1", "--pretty=%B")
+	if !strings.Contains(log, "analysis-output") {
+		t.Fatalf("expected a new commit with the fake agent's output, git log = %q", log)
+	}
+}
+
+func runOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
+	return string(output)
+}
+
+func TestPTYOpenPRDialogAndCancel(t *testing.T) {
+	fixture := newFixture(t)
+	run(t, fixture.root, "git", "checkout", "-b", "feature/869d6rn69-thing")
+	cmd := exec.Command(fixture.binary, "-config", fixture.config)
+	cmd.Dir = fixture.root
+	cmd.Env = append(os.Environ(), "PATH="+filepath.Dir(fixture.delta)+":"+os.Getenv("PATH"))
+	terminal, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer terminal.Close()
+	if err := pty.Setsize(terminal, &pty.Winsize{Cols: 120, Rows: 40}); err != nil {
+		t.Fatal(err)
+	}
+	_ = readUntil(t, terminal, "delta-output", 3*time.Second)
+	if _, err := terminal.Write([]byte("o")); err != nil {
+		t.Fatal(err)
+	}
+	output := readUntil(t, terminal, "analysis-output", 5*time.Second)
+	if !strings.Contains(output, "analysis-output") {
+		t.Fatalf("pr dialog did not show the generated draft:\n%s", output)
+	}
+	if _, err := terminal.Write([]byte{27}); err != nil { // esc
+		t.Fatal(err)
+	}
+	// A bare ESC immediately followed by another byte is ambiguous input
+	// (standalone Escape vs. the start of an escape sequence / alt+key
+	// combo); give the terminal input parser a moment to resolve it as a
+	// standalone Escape before sending the next key.
+	time.Sleep(100 * time.Millisecond)
+	if _, err := terminal.Write([]byte("q")); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("lazydiff exit: %v", err)
+	}
+}
+
 func run(t *testing.T, dir, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...)
