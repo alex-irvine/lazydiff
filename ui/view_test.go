@@ -41,6 +41,38 @@ func TestRenderTreeHidesCheckboxesOutsideWorkingTreeMode(t *testing.T) {
 	}
 }
 
+func TestViewRendersOpenDialogOverlay(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.dialog = NewActionDialog(CommitDialog)
+	model.dialog.SetDraft("Add OAuth login\n\nAdds login via OAuth provider.\n\nCU-869d6rn69", nil)
+	out := model.View()
+	if !strings.Contains(out, "Add OAuth login") {
+		t.Fatalf("expected dialog draft text in View() output:\n%s", out)
+	}
+	if !strings.Contains(out, "ctrl+s") || !strings.Contains(out, "esc") {
+		t.Fatalf("expected confirm/cancel hints in dialog overlay:\n%s", out)
+	}
+}
+
+func TestViewShowsGeneratingPlaceholderBeforeDraftReady(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.dialog = NewActionDialog(PRDialog)
+	out := model.View()
+	if !strings.Contains(out, "generating") {
+		t.Fatalf("expected generating placeholder before dialog is ready:\n%s", out)
+	}
+}
+
 func TestBoxWithDeltaContent(t *testing.T) {
 	rawDiff := "diff --git a/ui/render.go b/ui/render.go\nindex e11a12e..0809e9a 100644\n--- a/ui/render.go\n+++ b/ui/render.go\n@@ -96,28 +103,45 @@ func (m Model) renderDiff(r Rect) string {\n 	titleRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(\"245\")).Render(title)\n-	lines := []string{delta.Truncate(titleRendered, max(1, r.W-2))}\n-	content := delta.Lines(m.diffText)\n+	displayLines := []string{delta.Truncate(titleRendered, max(1, r.W-2))}\n+	wrapped := wrapContent(delta.Lines(m.diffText), max(1, r.W-4))\n 	visible := max(0, r.H-3)\n-	start := min(m.diffScroll, max(0, len(content)))\n-	for i := start; i < len(content) && i < start+visible; i++ {\n-		lines = append(lines, delta.Truncate(content[i], max(1, r.W-4)))\n+	start := min(m.diffScroll, max(0, len(wrapped)))\n+	for i := start; i < len(wrapped) && i < start+visible; i++ {\n+		displayLines = append(displayLines, wrapped[i])\n 	}\n-	return box(r, strings.Join(padLines(lines, r.H-2), \"\\n\"), m.focus == FocusDiff)\n+	return box(r, strings.Join(padLines(displayLines, r.H-2), \"\\n\"), m.focus == FocusDiff)\n }\n"
 

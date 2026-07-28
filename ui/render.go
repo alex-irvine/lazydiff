@@ -35,6 +35,9 @@ func (m Model) View() string {
 		body := fmt.Sprintf("Updating to lazydiff %s...", m.updateVersion)
 		return lipgloss.Place(m.termW, m.termH, lipgloss.Center, lipgloss.Center, lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).Render(body))
 	}
+	if m.dialog != nil {
+		return m.renderDialog()
+	}
 	l := m.layout
 	files := m.renderTree(l.Files)
 	code := m.renderDiff(l.Code)
@@ -55,6 +58,42 @@ func (m Model) View() string {
 		resultLines = resultLines[:m.termH]
 	}
 	return strings.Join(resultLines, "\n")
+}
+
+func (m Model) renderDialog() string {
+	title := "Commit Message"
+	if m.dialog.Kind == PRDialog {
+		title = "Pull Request"
+	}
+	width := m.termW - 10
+	if width > 100 {
+		width = 100
+	}
+	if width < 20 {
+		width = 20
+	}
+	height := m.termH - 12
+	if height > 20 {
+		height = 20
+	}
+	if height < 3 {
+		height = 3
+	}
+	m.dialog.Textarea.SetWidth(width)
+	m.dialog.Textarea.SetHeight(height)
+
+	var body strings.Builder
+	body.WriteString(lipgloss.NewStyle().Bold(true).Render(title))
+	body.WriteString("\n\n")
+	if m.dialog.Err != nil {
+		body.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render("generation error: " + m.dialog.Err.Error()))
+		body.WriteString("\n\n")
+	}
+	body.WriteString(m.dialog.View())
+	body.WriteString("\n\n")
+	body.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("ctrl+s confirm   esc cancel   ctrl+r regenerate"))
+
+	return lipgloss.Place(m.termW, m.termH, lipgloss.Center, lipgloss.Center, lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).Render(body.String()))
 }
 
 func (m Model) renderTree(r Rect) string {
