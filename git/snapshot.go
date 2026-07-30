@@ -67,6 +67,25 @@ func (r Repository) Snapshot(ctx context.Context, mode Mode) (Snapshot, error) {
 	return Snapshot{ID: fmt.Sprintf("%x", hash[:]), Mode: mode, Base: base, RawDiff: rawText, Files: files}, nil
 }
 
+func (r Repository) SnapshotBranch(ctx context.Context, branch string) (Snapshot, error) {
+	base, err := r.DefaultBranch(ctx)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("resolve base for branch diff: %w", err)
+	}
+	ref := base + "..." + branch
+	raw, err := r.run(ctx, "diff", "--no-color", "--binary", ref)
+	if err != nil && len(raw) == 0 {
+		return Snapshot{}, fmt.Errorf("diff %s: %w", ref, err)
+	}
+	rawText := string(raw)
+	files, parseErr := diff.Parse(rawText)
+	if parseErr != nil {
+		return Snapshot{}, fmt.Errorf("parse %s diff: %w", ref, parseErr)
+	}
+	hash := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s\x00%s", Branch, ref, rawText)))
+	return Snapshot{ID: fmt.Sprintf("%x", hash[:]), Mode: Branch, Base: ref, RawDiff: rawText, Files: files}, nil
+}
+
 func (r Repository) untrackedDiffs(ctx context.Context) (string, error) {
 	output, err := r.run(ctx, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {

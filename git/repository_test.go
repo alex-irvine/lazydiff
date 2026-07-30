@@ -190,3 +190,80 @@ func TestRemoteURLWrapsFailure(t *testing.T) {
 		t.Fatal("expected error for missing remote")
 	}
 }
+
+func TestBranchesListsLocalBranches(t *testing.T) {
+	dir := testRepo(t)
+	runGit(t, dir, "checkout", "-b", "feature-a")
+	runGit(t, dir, "checkout", "-b", "feature-b")
+	runGit(t, dir, "checkout", "main")
+	r, err := Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	branches, err := r.Branches(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(branches) != 3 {
+		t.Fatalf("expected 3 branches, got %v", branches)
+	}
+}
+
+func TestBranchesReturnsErrorOnGitFailure(t *testing.T) {
+	r := Repository{Root: "/bad", runner: fakeRunner{outputs: map[string][]byte{}}}
+	_, err := r.Branches(context.Background())
+	if err == nil {
+		t.Fatal("expected error for missing repository")
+	}
+}
+
+func TestBranchesViaFakeRunner(t *testing.T) {
+	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{
+		"-C /repo branch --format=%(refname:short)": []byte("main\nfeature-a\nfeature-b\n"),
+	}}}
+	branches, err := r.Branches(context.Background())
+	if err != nil || len(branches) != 3 || branches[0] != "main" {
+		t.Fatalf("branches = %v, err = %v", branches, err)
+	}
+}
+
+func TestSnapshotBranchDiffAgainstDefault(t *testing.T) {
+	dir := testRepo(t)
+	runGit(t, dir, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "feature.txt")
+	runGit(t, dir, "commit", "-m", "feature")
+	r, err := Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := r.SnapshotBranch(context.Background(), "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(snapshot.RawDiff, "feature.txt") {
+		t.Fatalf("branch snapshot should include feature.txt:\n%s", snapshot.RawDiff)
+	}
+	if !strings.Contains(snapshot.Base, "main...feature") {
+		t.Fatalf("expected base main...feature, got %q", snapshot.Base)
+	}
+}
+
+func TestSnapshotBranchViaFakeRunner(t *testing.T) {
+	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{
+		"-C /repo symbolic-ref --quiet --short refs/remotes/origin/HEAD": []byte("origin/main\n"),
+		"-C /repo diff --no-color --binary origin/main...feature":        []byte("diff --git a/x b/x\n@@ -1 +1 @@\n-old\n+new\n"),
+	}}}
+	snapshot, err := r.SnapshotBranch(context.Background(), "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Base != "origin/main...feature" {
+		t.Fatalf("base = %q", snapshot.Base)
+	}
+	if len(snapshot.Files) == 0 {
+		t.Fatal("expected parsed files")
+	}
+}

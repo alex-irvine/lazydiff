@@ -62,6 +62,21 @@ func (r Repository) runWithStdin(ctx context.Context, stdin io.Reader, args ...s
 	return r.runner.RunWithStdin(ctx, stdin, "git", append([]string{"-C", r.Root}, args...)...)
 }
 
+func (r Repository) Branches(ctx context.Context) ([]string, error) {
+	output, err := r.run(ctx, "branch", "--format=%(refname:short)")
+	if err != nil {
+		return nil, fmt.Errorf("list branches: %w", err)
+	}
+	var branches []string
+	for _, b := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		b = strings.TrimSpace(b)
+		if b != "" {
+			branches = append(branches, b)
+		}
+	}
+	return branches, nil
+}
+
 func (r Repository) DefaultBranch(ctx context.Context) (string, error) {
 	if output, err := r.run(ctx, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
 		if branch := strings.TrimSpace(string(output)); branch != "" {
