@@ -73,6 +73,54 @@ func TestViewShowsGeneratingPlaceholderBeforeDraftReady(t *testing.T) {
 	}
 }
 
+func TestRenderTreeShowsBranchSelectorWhenInBranchSelectorMode(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.treeMode = TreeModeBranchSelector
+	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "feature", "main")
+	out := model.renderTree(model.layout.Files)
+	if !strings.Contains(out, "feature") {
+		t.Fatalf("expected branch list in tree pane:\n%s", out)
+	}
+}
+
+func TestRenderTreeShowsBranchDiffLabelWhenInBranchDiffMode(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.treeMode = TreeModeBranchDiff
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	out := model.renderTree(model.layout.Files)
+	if !strings.Contains(out, "[1]") || !strings.Contains(out, "BRANCH DIFF") {
+		t.Fatalf("expected BRANCH DIFF title in tree pane:\n%s", out)
+	}
+}
+
+func TestStatusLineShowsTreeMode(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.diffStyled = true
+
+	model.treeMode = TreeModeWorktree
+	line := model.statusLine()
+	if !strings.Contains(line, "worktree") {
+		t.Fatalf("expected worktree in status line:\n%s", line)
+	}
+
+	model.treeMode = TreeModeStaged
+	line = model.statusLine()
+	if !strings.Contains(line, "staged") {
+		t.Fatalf("expected staged in status line:\n%s", line)
+	}
+}
+
 func TestBoxWithDeltaContent(t *testing.T) {
 	rawDiff := "diff --git a/ui/render.go b/ui/render.go\nindex e11a12e..0809e9a 100644\n--- a/ui/render.go\n+++ b/ui/render.go\n@@ -96,28 +103,45 @@ func (m Model) renderDiff(r Rect) string {\n 	titleRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(\"245\")).Render(title)\n-	lines := []string{delta.Truncate(titleRendered, max(1, r.W-2))}\n-	content := delta.Lines(m.diffText)\n+	displayLines := []string{delta.Truncate(titleRendered, max(1, r.W-2))}\n+	wrapped := wrapContent(delta.Lines(m.diffText), max(1, r.W-4))\n 	visible := max(0, r.H-3)\n-	start := min(m.diffScroll, max(0, len(content)))\n-	for i := start; i < len(content) && i < start+visible; i++ {\n-		lines = append(lines, delta.Truncate(content[i], max(1, r.W-4)))\n+	start := min(m.diffScroll, max(0, len(wrapped)))\n+	for i := start; i < len(wrapped) && i < start+visible; i++ {\n+		displayLines = append(displayLines, wrapped[i])\n 	}\n-	return box(r, strings.Join(padLines(lines, r.H-2), \"\\n\"), m.focus == FocusDiff)\n+	return box(r, strings.Join(padLines(displayLines, r.H-2), \"\\n\"), m.focus == FocusDiff)\n }\n"
 

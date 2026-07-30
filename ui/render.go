@@ -97,9 +97,16 @@ func (m Model) renderDialog() string {
 }
 
 func (m Model) renderTree(r Rect) string {
-	title := delta.Truncate(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render("[1] CHANGED FILES"), max(1, r.W-2))
-	lines := []string{title}
-	nodes := m.tree.Rows()
+	if m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
+		return m.renderBranchSelector(r)
+	}
+	title := "CHANGED FILES"
+	if m.treeMode == TreeModeBranchDiff {
+		title = "BRANCH DIFF"
+	}
+	titleRendered := delta.Truncate(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render("[1] "+title), max(1, r.W-2))
+	lines := []string{titleRendered}
+	nodes := m.visibleNodes()
 	if len(nodes) == 0 {
 		empty := delta.Truncate(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("(no changes)"), max(1, r.W-2))
 		lines = append(lines, empty)
@@ -161,6 +168,33 @@ func (m Model) renderTree(r Rect) string {
 			color = lipgloss.Color("179")
 		}
 		lines = append(lines, lipgloss.NewStyle().Foreground(color).Render(truncated))
+	}
+	return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
+}
+
+func (m Model) renderBranchSelector(r Rect) string {
+	title := delta.Truncate(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render("[1] BRANCHES"), max(1, r.W-2))
+	lines := []string{title}
+	rows := m.branchSelector.Rows()
+	if len(rows) == 0 {
+		empty := delta.Truncate(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("(no local branches)"), max(1, r.W-2))
+		lines = append(lines, empty)
+		return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
+	}
+	maxW := max(1, r.W-2)
+	for i, branch := range rows {
+		prefix := "  "
+		if i == m.branchSelector.Cursor() {
+			prefix = "▶ "
+		}
+		style := lipgloss.Color("245")
+		if i == m.branchSelector.Cursor() {
+			style = lipgloss.Color("51")
+		} else if branch == m.branchSelector.currentBranch {
+			style = lipgloss.Color("228")
+		}
+		line := delta.Truncate(prefix+branch, maxW)
+		lines = append(lines, lipgloss.NewStyle().Foreground(style).Render(line))
 	}
 	return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
 }
@@ -285,13 +319,17 @@ func (m Model) statusLine() string {
 	if m.diffStyled {
 		deltaState = "delta active"
 	}
+	modeLabel := m.treeMode.String()
+	if m.treeMode == TreeModeBranchDiff && m.branchSelector != nil {
+		modeLabel = "branch diff: " + m.branchSelector.selectedBranch
+	}
 	updateHint := ""
 	if m.showUpdateModal || m.showUpdating {
 		updateHint = ""
 	} else if m.updateVersion != "" {
 		updateHint = "  [u] update v" + m.updateVersion
 	}
-	return fmt.Sprintf("mode: %s  %s  %s  %s%s  %s", m.mode, deltaState, m.status, "[1-3] pane  [space] check  [c] commit  [o] PR  [?] help  [q] quit", updateHint, version.Current)
+	return fmt.Sprintf("mode: %s  %s  %s  %s%s  %s", modeLabel, deltaState, m.status, "[1-3] pane  [space] check  [c] commit  [o] PR  [?] help  [q] quit", updateHint, version.Current)
 }
 
 func (m Model) helpText() string {
@@ -324,8 +362,8 @@ func (m Model) helpText() string {
 		key("x", "Cancel running analysis"),
 		"",
 		section("General"),
-		key("m", "Toggle diff mode"),
 		key("r", "Refresh snapshot"),
+		key("[/]", "Cycle left pane / analysis tab"),
 		key("u", "Check for update"),
 		key("? / esc", "Close this help"),
 		key("q", "Quit"),
