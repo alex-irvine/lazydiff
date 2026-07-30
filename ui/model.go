@@ -504,7 +504,9 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case "shift+tab":
 		m.focus = (m.focus + 2) % 3
 	case "up", "k":
-		if m.focus == FocusTree {
+		if m.focus == FocusTree && m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
+			m.branchSelector.Move(-1)
+		} else if m.focus == FocusTree {
 			m.tree.Move(-1)
 			m.diffScroll = 0
 			return m, m.renderSelectedCmd()
@@ -516,7 +518,9 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			m.analysisScroll--
 		}
 	case "down", "j":
-		if m.focus == FocusTree {
+		if m.focus == FocusTree && m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
+			m.branchSelector.Move(1)
+		} else if m.focus == FocusTree {
 			m.tree.Move(1)
 			m.diffScroll = 0
 			return m, m.renderSelectedCmd()

@@ -204,6 +204,73 @@ func TestPTYOpenPRDialogAndCancel(t *testing.T) {
 	}
 }
 
+func TestPTYBranchDiffModeSelectsBranchAndShowsDiff(t *testing.T) {
+	fixture := newFixture(t)
+	run(t, fixture.root, "git", "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(fixture.root, "feat.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, fixture.root, "git", "add", "feat.txt")
+	run(t, fixture.root, "git", "commit", "-m", "feature commit")
+	run(t, fixture.root, "git", "checkout", "main")
+
+	cmd := exec.Command(fixture.binary, "-config", fixture.config)
+	cmd.Dir = fixture.root
+	cmd.Env = append(os.Environ(), "PATH="+filepath.Dir(fixture.delta)+":"+os.Getenv("PATH"))
+	terminal, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer terminal.Close()
+	if err := pty.Setsize(terminal, &pty.Winsize{Cols: 120, Rows: 40}); err != nil {
+		t.Fatal(err)
+	}
+	_ = readUntil(t, terminal, "delta-output", 3*time.Second)
+
+	// worktree → staged → branch selector
+	// Small delay between bracket presses so the model has time to
+	// transition state before the next bracket arrives.
+	if _, err := terminal.Write([]byte("]")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if _, err := terminal.Write([]byte("]")); err != nil {
+		t.Fatal(err)
+	}
+	output := readUntil(t, terminal, "BRANCHES", 3*time.Second)
+	if !strings.Contains(output, "main") || !strings.Contains(output, "feature") {
+		t.Fatalf("expected branches in selector:\n%s", output)
+	}
+
+	// move cursor to feature and select it
+	if _, err := terminal.Write([]byte("j")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := terminal.Write([]byte{13}); err != nil { // enter
+		t.Fatal(err)
+	}
+	output = readUntil(t, terminal, "BRANCH DIFF", 3*time.Second)
+	if !strings.Contains(output, "BRANCH DIFF") || !strings.Contains(output, "feat.txt") {
+		t.Fatalf("expected BRANCH DIFF with feat.txt:\n%s", output)
+	}
+
+	// h returns to branch selector
+	if _, err := terminal.Write([]byte("h")); err != nil {
+		t.Fatal(err)
+	}
+	output = readUntil(t, terminal, "BRANCHES", 3*time.Second)
+	if !strings.Contains(output, "BRANCHES") {
+		t.Fatalf("expected BRANCHES after h:\n%s", output)
+	}
+
+	if _, err := terminal.Write([]byte("q")); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("lazydiff exit: %v", err)
+	}
+}
+
 func run(t *testing.T, dir, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...)
