@@ -580,11 +580,13 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 				m.activeTab = RequestLogTab
 			}
 		} else if m.focus == FocusTree {
-			m.treeMode--
-			if m.treeMode == TreeModeBranchDiff {
-				m.treeMode = TreeModeStaged
-			} else if m.treeMode < 0 {
+			if m.treeMode == TreeModeWorktree {
 				m.treeMode = TreeModeBranchSelector
+				if m.branchSelector == nil {
+					return m, m.loadBranchesCmd()
+				}
+			} else {
+				m.treeMode = TreeModeWorktree
 			}
 		}
 	case "]":
@@ -595,13 +597,13 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 				m.activeTab = DetailTab
 			}
 		} else if m.focus == FocusTree {
-			if m.treeMode == TreeModeBranchDiff {
-				m.treeMode = TreeModeWorktree
-			} else {
-				m.treeMode = (m.treeMode + 1) % 3
-				if m.treeMode == TreeModeBranchSelector && m.branchSelector == nil {
+			if m.treeMode == TreeModeWorktree {
+				m.treeMode = TreeModeBranchSelector
+				if m.branchSelector == nil {
 					return m, m.loadBranchesCmd()
 				}
+			} else {
+				m.treeMode = TreeModeWorktree
 			}
 		}
 	case "1":

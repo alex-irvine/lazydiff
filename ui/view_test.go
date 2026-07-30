@@ -18,7 +18,7 @@ func TestRenderTreeShowsCheckboxesInWorkingTreeMode(t *testing.T) {
 	model.layout = ComputeLayout(120, 40)
 	model.snapshot = makeSnapshot("one")
 	model.haveSnap = true
-	model.mode = git.WorkingTree
+	model.treeMode = TreeModeWorktree
 	model.tree = NewTree(model.snapshot.Files)
 	model.tree.ToggleCheck()
 	out := model.renderTree(model.layout.Files)
@@ -33,7 +33,7 @@ func TestRenderTreeHidesCheckboxesOutsideWorkingTreeMode(t *testing.T) {
 	model.layout = ComputeLayout(120, 40)
 	model.snapshot = makeSnapshot("one")
 	model.haveSnap = true
-	model.mode = git.Branch
+	model.treeMode = TreeModeBranchDiff
 	model.tree = NewTree(model.snapshot.Files)
 	out := model.renderTree(model.layout.Files)
 	if strings.Contains(out, "[x]") || strings.Contains(out, "[ ]") || strings.Contains(out, "[-]") {
@@ -85,17 +85,33 @@ func TestRenderTreeShowsBranchSelectorWhenInBranchSelectorMode(t *testing.T) {
 	}
 }
 
-func TestRenderTreeShowsBranchDiffLabelWhenInBranchDiffMode(t *testing.T) {
+func TestRenderTreeShowsActiveTabGreenForWorktree(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	model.termW, model.termH = 120, 40
 	model.layout = ComputeLayout(120, 40)
-	model.treeMode = TreeModeBranchDiff
+	model.treeMode = TreeModeWorktree
 	model.snapshot = makeSnapshot("one")
 	model.haveSnap = true
 	model.tree = NewTree(model.snapshot.Files)
 	out := model.renderTree(model.layout.Files)
-	if !strings.Contains(out, "[1]") || !strings.Contains(out, "BRANCH DIFF") {
-		t.Fatalf("expected BRANCH DIFF title in tree pane:\n%s", out)
+	if !strings.Contains(out, "Worktree") {
+		t.Fatalf("expected Worktree tab:\n%s", out)
+	}
+}
+
+func TestRenderTreeShowsBranchNameInTabWhenInBranchDiff(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.treeMode = TreeModeBranchDiff
+	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "feature", "main")
+	model.branchSelector.Select("feature")
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	out := model.renderTree(model.layout.Files)
+	if !strings.Contains(out, "feature") {
+		t.Fatalf("expected branch name in tab bar:\n%s", out)
 	}
 }
 

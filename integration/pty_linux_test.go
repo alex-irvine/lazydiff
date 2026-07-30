@@ -227,19 +227,15 @@ func TestPTYBranchDiffModeSelectsBranchAndShowsDiff(t *testing.T) {
 	}
 	_ = readUntil(t, terminal, "delta-output", 3*time.Second)
 
-	// worktree → staged → branch selector
-	// Small delay between bracket presses so the model has time to
-	// transition state before the next bracket arrives.
+	// worktree → branch selector
 	if _, err := terminal.Write([]byte("]")); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if _, err := terminal.Write([]byte("]")); err != nil {
-		t.Fatal(err)
-	}
-	output := readUntil(t, terminal, "BRANCHES", 3*time.Second)
-	if !strings.Contains(output, "main") || !strings.Contains(output, "feature") {
-		t.Fatalf("expected branches in selector:\n%s", output)
+	// "feature" only appears in output once branch selector loads the branch list
+	output := readUntil(t, terminal, "feature", 3*time.Second)
+	if !strings.Contains(output, "main") {
+		t.Fatalf("expected branch list:\n%s", output)
 	}
 
 	// move cursor to feature and select it
@@ -249,18 +245,18 @@ func TestPTYBranchDiffModeSelectsBranchAndShowsDiff(t *testing.T) {
 	if _, err := terminal.Write([]byte{13}); err != nil { // enter
 		t.Fatal(err)
 	}
-	output = readUntil(t, terminal, "BRANCH DIFF", 3*time.Second)
-	if !strings.Contains(output, "BRANCH DIFF") || !strings.Contains(output, "feat.txt") {
-		t.Fatalf("expected BRANCH DIFF with feat.txt:\n%s", output)
+	output = readUntil(t, terminal, "feat.txt", 3*time.Second)
+	if !strings.Contains(output, "feat.txt") {
+		t.Fatalf("expected diff of feat.txt:\n%s", output)
 	}
 
 	// h returns to branch selector
 	if _, err := terminal.Write([]byte("h")); err != nil {
 		t.Fatal(err)
 	}
-	output = readUntil(t, terminal, "BRANCHES", 3*time.Second)
-	if !strings.Contains(output, "BRANCHES") {
-		t.Fatalf("expected BRANCHES after h:\n%s", output)
+	output = readUntil(t, terminal, "Branch", 3*time.Second)
+	if !strings.Contains(output, "Branch") {
+		t.Fatalf("expected Branch tab after h:\n%s", output)
 	}
 
 	if _, err := terminal.Write([]byte("q")); err != nil {

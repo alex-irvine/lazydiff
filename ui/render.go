@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/alex-irvine/lazydiff/delta"
-	"github.com/alex-irvine/lazydiff/git"
 	"github.com/alex-irvine/lazydiff/version"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -100,11 +99,8 @@ func (m Model) renderTree(r Rect) string {
 	if m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
 		return m.renderBranchSelector(r)
 	}
-	title := "CHANGED FILES"
-	if m.treeMode == TreeModeBranchDiff {
-		title = "BRANCH DIFF"
-	}
-	titleRendered := delta.Truncate(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render("[1] "+title), max(1, r.W-2))
+	title := m.renderTabBar()
+	titleRendered := delta.Truncate(title, max(1, r.W-2))
 	lines := []string{titleRendered}
 	nodes := m.visibleNodes()
 	if len(nodes) == 0 {
@@ -139,7 +135,7 @@ func (m Model) renderTree(r Rect) string {
 		}
 		indent := strings.Repeat("  ", node.Level)
 		checkbox := ""
-		if m.mode == git.WorkingTree {
+		if m.treeMode == TreeModeWorktree {
 			switch m.tree.CheckState(node) {
 			case Checked:
 				checkbox = "[x] "
@@ -173,7 +169,7 @@ func (m Model) renderTree(r Rect) string {
 }
 
 func (m Model) renderBranchSelector(r Rect) string {
-	title := delta.Truncate(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245")).Render("[1] BRANCHES"), max(1, r.W-2))
+	title := delta.Truncate(m.renderTabBar(), max(1, r.W-2))
 	lines := []string{title}
 	rows := m.branchSelector.Rows()
 	if len(rows) == 0 {
@@ -197,6 +193,27 @@ func (m Model) renderBranchSelector(r Rect) string {
 		lines = append(lines, lipgloss.NewStyle().Foreground(style).Render(line))
 	}
 	return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
+}
+
+func (m Model) renderTabBar() string {
+	green := lipgloss.Color("42")
+	dim := lipgloss.Color("245")
+	active := lipgloss.NewStyle().Foreground(green).Bold(true).Render
+	inactive := lipgloss.NewStyle().Foreground(dim).Render
+	switch m.treeMode {
+	case TreeModeWorktree, TreeModeStaged:
+		return active("Worktree") + "  " + inactive("Branch")
+	case TreeModeBranchDiff:
+		name := "Branch"
+		if m.branchSelector != nil && m.branchSelector.selectedBranch != "" {
+			name = m.branchSelector.selectedBranch
+		}
+		return inactive("Worktree") + "  " + active(name)
+	case TreeModeBranchSelector:
+		return inactive("Worktree") + "  " + active("Branch")
+	default:
+		return ""
+	}
 }
 
 func (m Model) renderDiff(r Rect) string {

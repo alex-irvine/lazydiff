@@ -769,20 +769,16 @@ func TestTreeModeCyclesWithBracketKeys(t *testing.T) {
 		t.Fatalf("initial treeMode = %d, want Worktree", model.treeMode)
 	}
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	if model.treeMode != TreeModeStaged {
-		t.Fatalf("after first ] treeMode = %d, want Staged", model.treeMode)
-	}
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
 	if model.treeMode != TreeModeBranchSelector {
-		t.Fatalf("after second ] treeMode = %d, want BranchSelector", model.treeMode)
+		t.Fatalf("after ] treeMode = %d, want BranchSelector", model.treeMode)
 	}
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
 	if model.treeMode != TreeModeWorktree {
-		t.Fatalf("after third ] treeMode = %d, want Worktree", model.treeMode)
+		t.Fatalf("after second ] treeMode = %d, want Worktree", model.treeMode)
 	}
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
 	if model.treeMode != TreeModeBranchSelector {
-		t.Fatalf("backward treeMode = %d, want BranchSelector", model.treeMode)
+		t.Fatalf("after [ treeMode = %d, want BranchSelector", model.treeMode)
 	}
 }
 
