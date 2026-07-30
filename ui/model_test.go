@@ -837,3 +837,72 @@ func (b *blockingRunner) Run(ctx context.Context, _ agent.Request, _ func(agent.
 }
 
 var _ = time.Second
+
+func TestSearchFiltersFilesInTree(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.searchActive = true
+	model.searchQuery = "a.go"
+	model = model.applySearchFilter()
+	visible := model.visibleNodes()
+	if len(visible) == 0 {
+		t.Fatal("expected at least one visible node")
+	}
+	found := false
+	for _, n := range visible {
+		if n.File != nil && n.File.Path == "a.go" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected a.go to be visible after search")
+	}
+}
+
+func TestSearchFilterNotFoundShowsNothing(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.searchActive = true
+	model.searchQuery = "zzz"
+	model = model.applySearchFilter()
+	visible := model.visibleNodes()
+	if len(visible) != 0 {
+		t.Fatalf("expected no visible nodes, got %d", len(visible))
+	}
+}
+
+func TestSearchInvalidRegexShowsError(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.searchActive = true
+	model.searchQuery = "[invalid"
+	model = model.applySearchFilter()
+	if !strings.Contains(model.status, "search:") {
+		t.Fatalf("expected search error in status, got %q", model.status)
+	}
+}
+
+func TestSearchResetsOnEsc(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.searchActive = true
+	model.searchQuery = "a.go"
+	model = model.applySearchFilter()
+	model, _ = model.updateSearchKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.searchActive || model.searchQuery != "" || model.searchFilter != nil {
+		t.Fatal("search should be cleared on esc")
+	}
+}
