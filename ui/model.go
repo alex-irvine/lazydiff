@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,6 +17,23 @@ import (
 	"github.com/alex-irvine/lazydiff/version"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+type TreeMode int
+
+const (
+	TreeModeWorktree TreeMode = iota
+	TreeModeStaged
+	TreeModeBranchSelector
+	TreeModeBranchDiff
+)
+
+type branchesLoadedMsg struct {
+	Branches []string
+	Current  string
+	Default  string
+}
+
+type branchesErrorMsg struct{ Err error }
 
 type Focus int
 
@@ -35,6 +53,7 @@ const (
 
 type SnapshotLoader interface {
 	Snapshot(context.Context, git.Mode) (git.Snapshot, error)
+	SnapshotBranch(context.Context, string) (git.Snapshot, error)
 }
 
 // Mutator is every git operation the commit/PR flows need beyond reading a
@@ -72,6 +91,8 @@ type Model struct {
 	snapshot       git.Snapshot
 	haveSnap       bool
 	mode           git.Mode
+	treeMode       TreeMode
+	branchSelector *BranchSelector
 	tree           *TreeModel
 	layout         Layout
 	termW          int
@@ -95,6 +116,9 @@ type Model struct {
 	updateManual    bool
 	updateStatus    string
 	send           func(tea.Msg)
+	searchActive   bool
+	searchQuery    string
+	searchFilter   *regexp.Regexp
 }
 
 type snapshotMsg struct{ Snapshot git.Snapshot }
@@ -161,7 +185,7 @@ func NewModel(repo git.Repository, cfg config.Config, loader SnapshotLoader, ren
 	return Model{
 		repo: repo, cfg: cfg, loader: loader, renderer: renderer, runner: runner, templates: templates,
 		mutator: mutator, opener: opener,
-		mode: git.WorkingTree, tree: NewTree(nil), focus: FocusTree, activeTab: DetailTab,
+		mode: git.WorkingTree, treeMode: TreeModeWorktree, tree: NewTree(nil), focus: FocusTree, activeTab: DetailTab,
 		results: make(map[string]*analysisResult), requests: make(map[string]context.CancelFunc),
 		status: "loading repository",
 	}
@@ -192,6 +216,9 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && m.searchActive {
+		return m.updateSearchKey(keyMsg)
+	}
 	if keyMsg, ok := msg.(tea.KeyMsg); ok && m.dialog != nil {
 		return m.updateDialogKey(keyMsg)
 	}
@@ -211,6 +238,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case snapshotErrorMsg:
 		m.status = "git error: " + message.Err.Error()
 		return m, tickCmd()
+	case branchesLoadedMsg:
+		m.branchSelector = NewBranchSelector(message.Branches, message.Current, message.Default)
+		return m, nil
+	case branchesErrorMsg:
+		m.status = "branch list: " + message.Err.Error()
+		return m, nil
 	case deltaMsg:
 		m.diffText, m.diffStyled, m.diffWarn = message.Content, message.Styled, message.Warning
 		if message.Warning != nil {
@@ -352,6 +385,45 @@ func (m *Model) applySnapshot(snapshot git.Snapshot) bool {
 	return changed
 }
 
+func (m Model) updateSearchKey(key tea.KeyMsg) (Model, tea.Cmd) {
+	switch key.String() {
+	case "esc":
+		m.searchActive = false
+		m.searchQuery = ""
+		m.searchFilter = nil
+		return m, nil
+	case "enter":
+		m.searchActive = false
+		return m, nil
+	case "n":
+		visible := m.visibleNodes()
+		for i, n := range visible {
+			if n.ID() == m.tree.selectedID && i < len(visible)-1 {
+				m.tree.selectNode(visible[i+1])
+				break
+			}
+		}
+		return m, nil
+	case "N":
+		visible := m.visibleNodes()
+		for i, n := range visible {
+			if n.ID() == m.tree.selectedID && i > 0 {
+				m.tree.selectNode(visible[i-1])
+				break
+			}
+		}
+		return m, nil
+	case "backspace":
+		if len(m.searchQuery) > 0 {
+			m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
+		}
+		return m.applySearchFilter(), nil
+	default:
+		m.searchQuery += key.String()
+		return m.applySearchFilter(), nil
+	}
+}
+
 func (m Model) updateDialogKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	action, cmd := m.dialog.Update(key)
 	switch action {
@@ -455,37 +527,78 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		if m.focus == FocusAnalysis {
 			m.analysisScroll++
 		}
+	case "enter":
+		if m.focus == FocusTree && m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
+			branch := m.branchSelector.Selected()
+			if branch != "" {
+				m.branchSelector.Select(branch)
+				m.treeMode = TreeModeBranchDiff
+				return m, m.refreshCmd()
+			}
+		}
 	case " ":
-		if m.focus == FocusTree && m.mode == git.WorkingTree {
+		if m.focus == FocusTree && m.treeMode == TreeModeWorktree {
 			m.tree.ToggleCheck()
 		}
 	case "ctrl+a":
-		if m.focus == FocusTree && m.mode == git.WorkingTree {
+		if m.focus == FocusTree && m.treeMode == TreeModeWorktree {
 			m.tree.ToggleCheckAll()
 		}
 	case "h":
+		if m.focus == FocusTree && m.treeMode == TreeModeBranchDiff {
+			m.treeMode = TreeModeBranchSelector
+			return m, nil
+		}
 		if m.focus == FocusTree {
 			m.tree.CollapseOrParent()
 			m.diffScroll = 0
 			return m, m.renderSelectedCmd()
 		}
 	case "l":
+		if m.focus == FocusTree && m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
+			branch := m.branchSelector.Selected()
+			if branch != "" {
+				m.branchSelector.Select(branch)
+				m.treeMode = TreeModeBranchDiff
+				return m, m.refreshCmd()
+			}
+		}
 		if m.focus == FocusTree {
 			m.tree.ExpandOrDescend()
 			m.diffScroll = 0
 			return m, m.renderSelectedCmd()
 		}
 	case "[":
-		if m.activeTab > 0 {
-			m.activeTab--
-		} else {
-			m.activeTab = RequestLogTab
+		if m.focus == FocusAnalysis {
+			if m.activeTab > 0 {
+				m.activeTab--
+			} else {
+				m.activeTab = RequestLogTab
+			}
+		} else if m.focus == FocusTree {
+			m.treeMode--
+			if m.treeMode == TreeModeBranchDiff {
+				m.treeMode = TreeModeStaged
+			} else if m.treeMode < 0 {
+				m.treeMode = TreeModeBranchSelector
+			}
 		}
 	case "]":
-		if m.activeTab < RequestLogTab {
-			m.activeTab++
-		} else {
-			m.activeTab = DetailTab
+		if m.focus == FocusAnalysis {
+			if m.activeTab < RequestLogTab {
+				m.activeTab++
+			} else {
+				m.activeTab = DetailTab
+			}
+		} else if m.focus == FocusTree {
+			if m.treeMode == TreeModeBranchDiff {
+				m.treeMode = TreeModeWorktree
+			} else {
+				m.treeMode = (m.treeMode + 1) % 3
+				if m.treeMode == TreeModeBranchSelector && m.branchSelector == nil {
+					return m, m.loadBranchesCmd()
+				}
+			}
 		}
 	case "1":
 		m.focus = FocusTree
@@ -499,17 +612,23 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case "A":
 		m.activeTab = DetailTab
 		return m, m.startAnalysis(true)
+	case "/":
+		if m.focus == FocusTree {
+			m.searchActive = true
+			m.searchQuery = ""
+			return m, nil
+		}
 	case "x":
 		m.cancelActive()
 	case "c":
-		if m.mode == git.WorkingTree && len(m.tree.StagingPlan()) > 0 {
+		if m.treeMode == TreeModeWorktree && len(m.tree.StagingPlan()) > 0 {
 			return m, m.startCommitCmd()
 		}
 	case "o":
+		if m.treeMode == TreeModeBranchDiff && m.branchSelector != nil && m.branchSelector.selectedBranch != "" {
+			return m, m.startPRForReviewedBranchCmd()
+		}
 		return m, m.startPRCmd()
-	case "m":
-		m.mode = m.mode.Next()
-		return m, m.refreshCmd()
 	case "r":
 		return m, m.refreshCmd()
 	case "g":
@@ -562,6 +681,17 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) refreshCmd() tea.Cmd {
+	if m.treeMode == TreeModeBranchDiff && m.branchSelector != nil && m.branchSelector.selectedBranch != "" {
+		loader := m.loader
+		branch := m.branchSelector.selectedBranch
+		return func() tea.Msg {
+			snapshot, err := loader.SnapshotBranch(context.Background(), branch)
+			if err != nil {
+				return snapshotErrorMsg{Err: err}
+			}
+			return snapshotMsg{Snapshot: snapshot}
+		}
+	}
 	loader, mode := m.loader, m.mode
 	return func() tea.Msg {
 		if loader == nil {
@@ -572,6 +702,25 @@ func (m Model) refreshCmd() tea.Cmd {
 			return snapshotErrorMsg{Err: err}
 		}
 		return snapshotMsg{Snapshot: snapshot}
+	}
+}
+
+func (m Model) loadBranchesCmd() tea.Cmd {
+	repo := m.repo
+	return func() tea.Msg {
+		branches, err := repo.Branches(context.Background())
+		if err != nil {
+			return branchesErrorMsg{Err: err}
+		}
+		current, err := repo.CurrentBranch(context.Background())
+		if err != nil {
+			return branchesErrorMsg{Err: err}
+		}
+		def, err := repo.DefaultBranch(context.Background())
+		if err != nil {
+			return branchesErrorMsg{Err: err}
+		}
+		return branchesLoadedMsg{Branches: branches, Current: current, Default: def}
 	}
 }
 
@@ -761,6 +910,41 @@ func (m Model) startPRCmd() tea.Cmd {
 	}
 }
 
+func (m Model) startPRForReviewedBranchCmd() tea.Cmd {
+	mutator, loader, cfg, templates := m.mutator, m.loader, m.cfg, m.templates
+	branch := m.branchSelector.selectedBranch
+	repoRoot := m.repo.Root
+	return func() tea.Msg {
+		ctx := context.Background()
+		base, err := mutator.DefaultBranch(ctx)
+		if err != nil {
+			return prPrepMsg{Err: err}
+		}
+		if branch == base {
+			return prPrepMsg{Err: fmt.Errorf("cannot open a pull request from the default branch %q", base)}
+		}
+		snapshot, err := loader.SnapshotBranch(ctx, branch)
+		if err != nil {
+			return prPrepMsg{Err: err}
+		}
+		ticket, err := pr.ExtractTicket(cfg.PR.TicketPattern, branch)
+		if err != nil {
+			return prPrepMsg{Err: err}
+		}
+		rendered, err := templates.RenderPRDescription(prompt.Context{
+			Repository: repoRoot,
+			Branch:     branch,
+			BaseBranch: base,
+			BranchDiff: snapshot.RawDiff,
+			Ticket:     ticket,
+		})
+		if err != nil {
+			return prPrepMsg{Err: err}
+		}
+		return prPrepMsg{Ticket: ticket, Prompt: rendered}
+	}
+}
+
 func (m Model) runPRAgentCmd(renderedPrompt, ticket string) tea.Cmd {
 	runner, repoRoot := m.runner, m.repo.Root
 	return func() tea.Msg {
@@ -832,4 +1016,55 @@ func performUpdateCmd() tea.Cmd {
 		err := version.PerformUpdate()
 		return updatePerformedMsg{Error: err}
 	}
+}
+
+func (m TreeMode) String() string {
+	switch m {
+	case TreeModeWorktree:
+		return "worktree"
+	case TreeModeStaged:
+		return "staged"
+	case TreeModeBranchSelector:
+		return "branch selector"
+	case TreeModeBranchDiff:
+		return "branch diff"
+	default:
+		return "unknown"
+	}
+}
+
+func (m Model) applySearchFilter() Model {
+	if !m.searchActive || m.searchQuery == "" {
+		m.searchFilter = nil
+		return m
+	}
+	re, err := regexp.Compile("(?i)" + m.searchQuery)
+	if err != nil {
+		m.searchFilter = nil
+		m.status = "search: " + err.Error()
+		return m
+	}
+	m.searchFilter = re
+	return m
+}
+
+func (m Model) visibleNodes() []*TreeNode {
+	if m.searchFilter == nil {
+		return m.tree.Rows()
+	}
+	all := m.tree.Rows()
+	var result []*TreeNode
+	for _, n := range all {
+		if m.searchFilter.MatchString(nodeSearchLabel(n)) {
+			result = append(result, n)
+		}
+	}
+	return result
+}
+
+func nodeSearchLabel(n *TreeNode) string {
+	if n.File != nil {
+		return n.File.DisplayPath()
+	}
+	return n.Label
 }

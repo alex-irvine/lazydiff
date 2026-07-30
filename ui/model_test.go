@@ -213,8 +213,9 @@ func TestComputeLayoutCapsLeftRail(t *testing.T) {
 }
 
 type fakeLoader struct {
-	snapshots []git.Snapshot
-	index     int
+	snapshots       []git.Snapshot
+	branchSnapshots map[string]git.Snapshot
+	index           int
 }
 
 func (f *fakeLoader) Snapshot(context.Context, git.Mode) (git.Snapshot, error) {
@@ -223,6 +224,15 @@ func (f *fakeLoader) Snapshot(context.Context, git.Mode) (git.Snapshot, error) {
 		f.index++
 	}
 	return snapshot, nil
+}
+
+func (f *fakeLoader) SnapshotBranch(_ context.Context, branch string) (git.Snapshot, error) {
+	if f.branchSnapshots != nil {
+		if s, ok := f.branchSnapshots[branch]; ok {
+			return s, nil
+		}
+	}
+	return f.snapshots[0], nil
 }
 
 type fakeRenderer struct{}
@@ -750,6 +760,71 @@ func TestDialogCapturesKeysBeforeTreeNavigation(t *testing.T) {
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	if model.tree.cursor != startCursor {
 		t.Fatal("key reached tree navigation while dialog was open")
+	}
+}
+
+func TestTreeModeCyclesWithBracketKeys(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	if model.treeMode != TreeModeWorktree {
+		t.Fatalf("initial treeMode = %d, want Worktree", model.treeMode)
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if model.treeMode != TreeModeStaged {
+		t.Fatalf("after first ] treeMode = %d, want Staged", model.treeMode)
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if model.treeMode != TreeModeBranchSelector {
+		t.Fatalf("after second ] treeMode = %d, want BranchSelector", model.treeMode)
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if model.treeMode != TreeModeWorktree {
+		t.Fatalf("after third ] treeMode = %d, want Worktree", model.treeMode)
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	if model.treeMode != TreeModeBranchSelector {
+		t.Fatalf("backward treeMode = %d, want BranchSelector", model.treeMode)
+	}
+}
+
+func TestBracketKeysStillCycleAnalysisTabsWhenFocusIsAnalysis(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.focus = FocusAnalysis
+	model.activeTab = DetailTab
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if model.activeTab != OverallTab {
+		t.Fatalf("activeTab = %d, want OverallTab", model.activeTab)
+	}
+}
+
+func TestBranchSelectorEnterLoadsBranchDiff(t *testing.T) {
+	loader := &fakeLoader{
+		snapshots: []git.Snapshot{makeSnapshot("one")},
+		branchSnapshots: map[string]git.Snapshot{
+			"feature": makeSnapshot("branch"),
+		},
+	}
+	model := newTestModel(loader, &fakeRunner{})
+	model.treeMode = TreeModeBranchSelector
+	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "main", "main")
+	model.branchSelector.Move(1)
+
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.treeMode != TreeModeBranchDiff {
+		t.Fatalf("treeMode = %d, want BranchDiff", model.treeMode)
+	}
+	if model.branchSelector.selectedBranch != "feature" {
+		t.Fatalf("selectedBranch = %q", model.branchSelector.selectedBranch)
+	}
+	if cmd == nil {
+		t.Fatal("expected a cmd")
+	}
+	msg := cmd()
+	snapMsg, ok := msg.(snapshotMsg)
+	if !ok {
+		t.Fatalf("expected snapshotMsg, got %T", msg)
+	}
+	if snapMsg.Snapshot.ID != "branch" {
+		t.Fatalf("snapshot ID = %q, want 'branch'", snapMsg.Snapshot.ID)
 	}
 }
 

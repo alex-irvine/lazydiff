@@ -101,3 +101,7 @@ type repositoryLoader struct{ repo git.Repository }
 func (l repositoryLoader) Snapshot(ctx context.Context, mode git.Mode) (git.Snapshot, error) {
 	return l.repo.Snapshot(ctx, mode)
 }
+
+func (l repositoryLoader) SnapshotBranch(ctx context.Context, branch string) (git.Snapshot, error) {
+	return l.repo.SnapshotBranch(ctx, branch)
+}
