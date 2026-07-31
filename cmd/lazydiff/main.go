@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"flag"
 	"fmt"
@@ -128,11 +129,15 @@ func (l repositoryLoader) SnapshotPR(ctx context.Context, number int) (git.Snaps
 	if err != nil {
 		return git.Snapshot{}, err
 	}
-	id := fmt.Sprintf("pr-%d-%s", p.Number, p.CreatedAt)
+	base := p.BaseRefName + "..." + p.HeadRefName
+	// Content-hashed, matching git.Repository.Snapshot/SnapshotBranch — a
+	// PR's CreatedAt never changes as new commits land, so hashing on that
+	// (as before) would never mark cached AI analysis stale after an update.
+	hash := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s\x00%s", git.Branch, base, raw)))
 	return git.Snapshot{
-		ID:      id,
+		ID:      fmt.Sprintf("%x", hash[:]),
 		Mode:    git.Branch,
-		Base:    p.BaseRefName + "..." + p.HeadRefName,
+		Base:    base,
 		RawDiff: raw,
 		Files:   files,
 	}, nil
