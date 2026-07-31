@@ -36,7 +36,7 @@ func testRepo(t *testing.T) string {
 }
 
 func TestExecRunnerRunWithStdinPipesInput(t *testing.T) {
-	output, err := execRunner{}.RunWithStdin(context.Background(), strings.NewReader("hello\n"), "cat")
+	output, err := ExecRunner{}.RunWithStdin(context.Background(), strings.NewReader("hello\n"), "cat")
 	if err != nil {
 		t.Fatal(err)
 	}
