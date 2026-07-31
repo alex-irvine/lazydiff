@@ -339,9 +339,18 @@ func (m Model) renderDiff(r Rect) string {
 }
 
 func (m Model) renderAnalysis(r Rect) string {
-	tabNames := []string{"detail", "overall", "request log"}
-	tabRendered := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51")).Render("[3] " + tabNames[m.activeTab])
-	displayLines := []string{delta.Truncate(tabRendered, max(1, r.W-2))}
+	green := lipgloss.Color("42")
+	dim := lipgloss.Color("245")
+	active := lipgloss.NewStyle().Foreground(green).Bold(true).Render
+	inactive := lipgloss.NewStyle().Foreground(dim).Render
+	tabNames := []string{"Detail", "Overall", "Request Log"}
+	title := active("[3] " + tabNames[m.activeTab])
+	for i, name := range tabNames {
+		if i != int(m.activeTab) {
+			title += "  " + inactive(name)
+		}
+	}
+	displayLines := []string{delta.Truncate(title, max(1, r.W-2))}
 	content := wrapContent(m.analysisLines(), max(1, r.W-4))
 	start := min(m.analysisScroll, len(content))
 	visible := max(0, r.H-3)
