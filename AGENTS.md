@@ -1,6 +1,6 @@
 # lazydiff
 
-Terminal Git diff reviewer (Go 1.24 + Bubble Tea) that shells out to an AI CLI (default provider: `opencode`, see drift note below) to explain diffs, and can stage/commit/push and open a GitHub PR. The AI agent is always read-only; **all git mutations happen in Go code**, never in the agent process.
+Terminal Git diff reviewer (Go 1.24 + Bubble Tea) that shells out to an AI CLI (default provider: `opencode`, see drift note below) to explain diffs, can stage/commit/push and open a GitHub PR, and can browse/review open GitHub pull requests (approve/request-changes/merge/close+delete-branch) via the `gh` CLI. The AI agent is always read-only; **all git and `gh` mutations happen in Go code**, never in the agent process.
 
 ## Build, test, verify
 
@@ -22,20 +22,20 @@ git diff --check
 
 ## Architecture
 
-Dependency direction (leaf → root): `diff` → `git` → `ui`; `agent`, `config`, `delta`, `pr`, `prompt`, `version` are independent leaves also consumed by `ui`; `cmd/lazydiff` wires everything and is the only `main` package.
+Dependency direction (leaf → root): `diff` → `git` → `pr` → `ui`; `agent`, `config`, `delta`, `prompt`, `version` are independent leaves also consumed by `ui`; `cmd/lazydiff` wires everything and is the only `main` package. `pr` depends on `git` (reuses `git.CommandRunner`/`git.ExecRunner` to shell out to `gh`) — one-way, no cycle.
 
 | Package | Responsibility |
 |---|---|
 | `diff` | Pure unified-diff parser/model (`File`, `Hunk`) plus `BuildPatch` (slices a sub-patch from selected hunks for partial staging, git-add-p style). No git CLI calls. |
-| `git` | The **only** package that shells out to `git`. `Repository` (via `git.Open`) exposes reads (`Snapshot`, `CurrentBranch`, `DefaultBranch`, `RemoteURL`) and mutations (`StageFile`, `StagePatch`, `Commit`, `Push`), all routed through the `CommandRunner` interface — the seam faked in tests. |
+| `git` | The **only** package that shells out to `git`. `Repository` (via `git.Open`) exposes reads (`Snapshot`, `SnapshotBranch`, `CurrentBranch`, `DefaultBranch`, `RemoteURL`) and mutations (`StageFile`, `StagePatch`, `Commit`, `Push`), all routed through the `CommandRunner` interface (`ExecRunner` is the real, exported impl; the interface is the seam faked in tests). `Snapshot`/`SnapshotBranch` IDs are `sha256(mode, base, rawDiff)` hex — content-derived so cached AI analysis reliably gets marked stale when the diff changes; any new snapshot-producing code (e.g. `cmd/lazydiff`'s `SnapshotPR`) must follow the same scheme, not derive an ID from metadata like a timestamp. |
 | `agent` | Runs the external AI CLI via the `Runner` interface. `Generic` pipes the prompt over stdin, streams stdout/stderr line-by-line as `Event`s. `Copilot` wraps `Generic`, writing the prompt to a temp file and adding read-only/no-external-tool CLI flags. `OpenCode` wraps `Generic`, adding `--pure` (when external tools disallowed) and `--auto` (non-interactive) flags. |
 | `config` | Loads/validates `$XDG_CONFIG_HOME/lazydiff/config.toml` (TOML), overlaid onto `Default()`. |
 | `prompt` | Compiles the 4 prompt templates (overall/detail/commit_message/pr_description) from `config` into `text/template`s, renders against a `Context`. |
 | `delta` | Shells out to `delta` for ANSI-colored diff display; falls back to raw diff text on any failure (missing binary, non-zero exit). Display-only — raw diff is always what's parsed and sent to the agent. |
-| `pr` | Ticket-ID extraction, GitHub-only compare-URL construction, opening it in the browser. No `gh` CLI, no GitHub API — "PR creation" is push + a pre-filled `github.com/.../compare/...` URL (lazygit-style); non-`github.com` remotes error out by design. Default ticket pattern extracts a bare 6-10 char lowercase-alphanumeric ID from the branch name (ClickUp-style) and prefixes it `CU-` only in generated titles/trailers. |
-| `version` | `Current` var (default `"dev"`, overridden via `-ldflags` on tagged builds) plus self-update (`CheckForUpdate`/`PerformUpdate`) — the one place that shells out to `gh` (distinct from `pr`, which never does). |
-| `ui` | The Bubble Tea app: `Model` (state), `TreeModel` (file/hunk tree + staging checkboxes), `ActionDialog` (shared commit/PR modal), layout/rendering. |
-| `cmd/lazydiff` | `main` — loads config, opens the repo, picks the agent adapter from `cfg.Agent.Provider`, wires everything into `ui.Model`, runs the Bubble Tea program. |
+| `pr` | Two independent responsibilities. (1) Ticket-ID extraction + GitHub-only compare-URL construction + opening it in the browser — "PR creation" is push + a pre-filled `github.com/.../compare/...` URL (lazygit-style); non-`github.com` remotes error out by design. Default ticket pattern extracts a bare 6-10 char lowercase-alphanumeric ID from the branch name (ClickUp-style) and prefixes it `CU-` only in generated titles/trailers. (2) `GitHub` (`pr/gh.go`) — a `gh` CLI wrapper for PR *review*: `ListPRs`/`PR`/`PRDiff`/`Approve`/`RequestChanges`/`Merge`/`Close`/`DeleteBranch`, all via `git.CommandRunner` (not `git.Repository`) and all gated by `requireGitHub()` (github.com-only, checked per call). |
+| `version` | `Current` var (default `"dev"`, overridden via `-ldflags` on tagged builds) plus self-update (`CheckForUpdate`/`PerformUpdate`) — shells out to `gh` independently of `pr.GitHub` (distinct code path, same CLI). |
+| `ui` | The Bubble Tea app: `Model` (state), `TreeModel` (file/hunk tree + staging checkboxes), `BranchSelector`/`PRSelector` (list + cursor, mirror each other), `ActionDialog` (shared commit/PR-description/request-changes modal, editable textarea) and `ConfirmDialog` (title+hint modal, no editable text, for approve/merge/close+delete), layout/rendering. |
+| `cmd/lazydiff` | `main` — loads config, opens the repo, picks the agent adapter from `cfg.Agent.Provider`, constructs `pr.GitHub` from the `origin` remote URL, wires everything into `ui.Model` (including `repositoryLoader.SnapshotPR`, which builds a PR's `git.Snapshot` from `gh pr view`+`gh pr diff`), runs the Bubble Tea program. |
 
 ### UI async pattern
 
@@ -45,7 +45,11 @@ Every git/agent operation is a `tea.Cmd` (closure over value-copied deps, never 
 
 ### Commit/PR mutation flow (confirm-before-mutate)
 
-`c` (commit — only when `mode == git.WorkingTree` and the staging plan is non-empty) and `o` (PR — always available) open `ActionDialog` immediately in a "generating" state, stage/diff/render a prompt, and stream the agent's draft into an editable `bubbles/textarea`. **Nothing mutates the repo (stage, commit, push, or open a browser URL) until the user presses `ctrl+s` inside the open dialog**; `esc` cancels, `ctrl+r` restarts generation from scratch. Confirm handlers additionally no-op unless `dialog.Ready && dialog.Err == nil`.
+`c` (commit — only when `mode == git.WorkingTree` and the staging plan is non-empty) and `o` (PR — always available, except in `TreeModePRDiff` where `o` opens the reviewed PR's URL instead, see below) open `ActionDialog` immediately in a "generating" state, stage/diff/render a prompt, and stream the agent's draft into an editable `bubbles/textarea`. **Nothing mutates the repo (stage, commit, push, or open a browser URL) until the user presses `ctrl+s` inside the open dialog**; `esc` cancels, `ctrl+r` restarts generation from scratch. Confirm handlers additionally no-op unless `dialog.Ready && dialog.Err == nil`.
+
+### PR review flow (browse, diff, approve/merge/close)
+
+`[`/`]` cycles `TreeModeWorktree → TreeModeBranchSelector → TreeModePRSelector` (and back); `enter`/`l` on a `PRSelector` row loads that PR's diff (`TreeModePRDiff`) via `SnapshotLoader.SnapshotPR`, caching the result in `PRSelector.diffCache` keyed by PR number; `h` steps back one level (PR diff → PR selector → branch selector). Only in `TreeModePRDiff`, a `g`-prefixed two-key sequence (`ga`/`gr`/`gm`/`gd` — approve/request-changes/merge/close+delete-branch) is read via a `pendingPRKey` field that is unconditionally cleared at the top of every `updateKey` call and re-armed only by `g` itself — this is what stops a stale `g` press from misfiring on an unrelated later keystroke. `ga`/`gm`/`gd` open a `ConfirmDialog` (no editable text); `gr` opens an `ActionDialog` (kind `RequestChangesDialog`, hand-written comment, no AI regeneration). **All four stay open until the async `prActionDoneMsg` result arrives** (mirroring the commit/PR-description dialogs above) — `ActionConfirm` does not close the dialog synchronously; the dialog is only cleared on success, with `Err` attached and left open on failure, so a failed mutation is never silently invisible. Closing a PR treats branch deletion as best-effort: if `Close` succeeds but `DeleteBranch` fails, the dialog still closes (the primary action succeeded) but the status line surfaces the delete failure explicitly rather than swallowing it.
 
 ### Staging → git mapping
 
