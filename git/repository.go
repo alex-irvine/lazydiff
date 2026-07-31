@@ -14,14 +14,14 @@ type CommandRunner interface {
 	RunWithStdin(context.Context, io.Reader, string, ...string) ([]byte, error)
 }
 
-type execRunner struct{}
+type ExecRunner struct{}
 
-func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	return cmd.Output()
 }
 
-func (execRunner) RunWithStdin(ctx context.Context, stdin io.Reader, name string, args ...string) ([]byte, error) {
+func (ExecRunner) RunWithStdin(ctx context.Context, stdin io.Reader, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = stdin
 	return cmd.Output()
@@ -33,7 +33,7 @@ type Repository struct {
 }
 
 func Open(ctx context.Context, dir string) (Repository, error) {
-	return OpenWithRunner(ctx, dir, execRunner{})
+	return OpenWithRunner(ctx, dir, ExecRunner{})
 }
 
 func OpenWithRunner(ctx context.Context, dir string, runner CommandRunner) (Repository, error) {
@@ -50,14 +50,14 @@ func OpenWithRunner(ctx context.Context, dir string, runner CommandRunner) (Repo
 
 func (r Repository) run(ctx context.Context, args ...string) ([]byte, error) {
 	if r.runner == nil {
-		r.runner = execRunner{}
+		r.runner = ExecRunner{}
 	}
 	return r.runner.Run(ctx, "git", append([]string{"-C", r.Root}, args...)...)
 }
 
 func (r Repository) runWithStdin(ctx context.Context, stdin io.Reader, args ...string) ([]byte, error) {
 	if r.runner == nil {
-		r.runner = execRunner{}
+		r.runner = ExecRunner{}
 	}
 	return r.runner.RunWithStdin(ctx, stdin, "git", append([]string{"-C", r.Root}, args...)...)
 }
