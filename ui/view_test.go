@@ -8,6 +8,7 @@ import (
 
 	"github.com/alex-irvine/lazydiff/delta"
 	"github.com/alex-irvine/lazydiff/git"
+	"github.com/alex-irvine/lazydiff/pr"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -183,5 +184,79 @@ func TestBoxWithDeltaContent(t *testing.T) {
 				fmt.Printf("    [%d] sw=%d len=%d\n", j, ansi.StringWidth(rl), len(rl))
 			}
 		}
+	}
+}
+
+func TestRenderTreeShowsPRSelectorWhenInPRSelectorMode(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.treeMode = TreeModePRSelector
+	model.prSelector = NewPRSelector(makeTestPRs())
+	out := model.renderTree(model.layout.Files)
+	if !strings.Contains(out, "#42") || !strings.Contains(out, "feat: add login") {
+		t.Fatalf("expected PR rows in tree pane:\n%s", out)
+	}
+}
+
+func TestRenderPRSelectorShowsNoOpenPRs(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.treeMode = TreeModePRSelector
+	model.prSelector = NewPRSelector(nil)
+	out := model.renderTree(model.layout.Files)
+	if !strings.Contains(out, "no open pull requests") {
+		t.Fatalf("expected empty message:\n%s", out)
+	}
+}
+
+func TestRenderPRSelectorShowsInlineError(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.treeMode = TreeModePRSelector
+	model.prSelector = NewPRSelector(nil)
+	model.prSelector.err = fmt.Errorf("gh not installed")
+	out := model.renderTree(model.layout.Files)
+	if !strings.Contains(out, "gh not installed") {
+		t.Fatalf("expected inline error:\n%s", out)
+	}
+}
+
+func TestTabBarShowsPRsThirdTab(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.treeMode = TreeModeWorktree
+	model.termW, model.termH = 80, 24
+	model.layout = ComputeLayout(80, 24)
+	if !strings.Contains(model.renderTabBar(), "Worktree") || !strings.Contains(model.renderTabBar(), "PRs") {
+		t.Fatalf("tab bar: %s", model.renderTabBar())
+	}
+	model.treeMode = TreeModePRSelector
+	if !strings.Contains(model.renderTabBar(), "PRs") {
+		t.Fatalf("pr tab not active")
+	}
+}
+
+func TestStatusLineShowsPR(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 80, 24
+	model.layout = ComputeLayout(80, 24)
+	model.treeMode = TreeModePRDiff
+	model.prSelector = NewPRSelector([]pr.PR{{Number: 42, Title: "feat x"}})
+	model.prSelector.selectedPR = &model.prSelector.prs[0]
+	sl := model.statusLine()
+	if !strings.Contains(sl, "PR #42") {
+		t.Fatalf("status: %s", sl)
+	}
+}
+
+func TestRenderConfirmDialog(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 80, 24
+	model.confirm = NewConfirmDialog(ApproveDialog, "Approve PR #42")
+	out := model.renderConfirmDialog()
+	if !strings.Contains(out, "Approve PR") || !strings.Contains(out, "ctrl+s") {
+		t.Fatalf("confirm dialog out: %s", out)
 	}
 }

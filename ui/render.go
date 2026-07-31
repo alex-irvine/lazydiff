@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/alex-irvine/lazydiff/delta"
+	"github.com/alex-irvine/lazydiff/pr"
 	"github.com/alex-irvine/lazydiff/version"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -33,6 +34,9 @@ func (m Model) View() string {
 	if m.showUpdating {
 		body := fmt.Sprintf("Updating to lazydiff %s...", m.updateVersion)
 		return lipgloss.Place(m.termW, m.termH, lipgloss.Center, lipgloss.Center, lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).Render(body))
+	}
+	if m.confirm != nil {
+		return m.renderConfirmDialog()
 	}
 	if m.dialog != nil {
 		return m.renderDialog()
@@ -61,8 +65,11 @@ func (m Model) View() string {
 
 func (m Model) renderDialog() string {
 	title := "Commit Message"
-	if m.dialog.Kind == PRDialog {
+	switch m.dialog.Kind {
+	case PRDialog:
 		title = "Pull Request"
+	case RequestChangesDialog:
+		title = "Request Changes"
 	}
 	width := m.termW - 10
 	if width > 100 {
@@ -90,12 +97,46 @@ func (m Model) renderDialog() string {
 	}
 	body.WriteString(m.dialog.View())
 	body.WriteString("\n\n")
-	body.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("ctrl+s confirm   esc cancel   ctrl+r regenerate"))
+	hint := "ctrl+s confirm   esc cancel"
+	if m.dialog.Kind != RequestChangesDialog {
+		hint += "   ctrl+r regenerate"
+	}
+	body.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(hint))
 
 	return lipgloss.Place(m.termW, m.termH, lipgloss.Center, lipgloss.Center, lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).Render(body.String()))
 }
 
+func (m Model) renderConfirmDialog() string {
+	width := m.termW - 10
+	if width > 100 {
+		width = 100
+	}
+	if width < 20 {
+		width = 20
+	}
+	height := m.termH - 12
+	if height > 20 {
+		height = 20
+	}
+	if height < 3 {
+		height = 3
+	}
+	var body strings.Builder
+	body.WriteString(lipgloss.NewStyle().Bold(true).Render(m.confirm.Title))
+	body.WriteString("\n\n")
+	if m.confirm.Err != nil {
+		body.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render("error: " + m.confirm.Err.Error()))
+		body.WriteString("\n\n")
+	}
+	body.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("ctrl+s confirm   esc cancel"))
+	style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).Width(width).Height(height)
+	return lipgloss.Place(m.termW, m.termH, lipgloss.Center, lipgloss.Center, style.Render(body.String()))
+}
+
 func (m Model) renderTree(r Rect) string {
+	if m.treeMode == TreeModePRSelector && m.prSelector != nil {
+		return m.renderPRSelector(r)
+	}
 	if m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
 		return m.renderBranchSelector(r)
 	}
@@ -195,6 +236,59 @@ func (m Model) renderBranchSelector(r Rect) string {
 	return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
 }
 
+func (m Model) renderPRSelector(r Rect) string {
+	title := delta.Truncate(m.renderTabBar(), max(1, r.W-2))
+	lines := []string{title}
+	rows := m.visiblePRs()
+	if len(rows) == 0 {
+		msg := "(no open pull requests)"
+		if m.prSelector.err != nil {
+			msg = "(error: " + m.prSelector.err.Error() + ")"
+		}
+		empty := delta.Truncate(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(msg), max(1, r.W-2))
+		lines = append(lines, empty)
+		return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
+	}
+	maxW := max(1, r.W-2)
+	for i, p := range rows {
+		prefix := "  "
+		if i == m.prSelector.Cursor() {
+			prefix = "▶ "
+		}
+		icon := "✓"
+		if p.Mergeable == "CONFLICTING" {
+			icon = "✗"
+		} else if p.Mergeable == "UNKNOWN" {
+			icon = "?"
+		}
+		style := lipgloss.Color("245")
+		if i == m.prSelector.Cursor() {
+			style = lipgloss.Color("51")
+		}
+		line := fmt.Sprintf("%s#%d %s  (%s, %s)", prefix, p.Number, p.Title, p.Author, icon)
+		lines = append(lines, lipgloss.NewStyle().Foreground(style).Render(delta.Truncate(line, maxW)))
+	}
+	return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
+}
+
+func (m Model) visiblePRs() []pr.PR {
+	if m.prSelector == nil {
+		return nil
+	}
+	if m.searchFilter == nil {
+		return m.prSelector.Rows()
+	}
+	all := m.prSelector.Rows()
+	var result []pr.PR
+	for _, p := range all {
+		label := fmt.Sprintf("#%d %s", p.Number, p.Title)
+		if m.searchFilter.MatchString(label) {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
 func (m Model) renderTabBar() string {
 	green := lipgloss.Color("42")
 	dim := lipgloss.Color("245")
@@ -202,15 +296,23 @@ func (m Model) renderTabBar() string {
 	inactive := lipgloss.NewStyle().Foreground(dim).Render
 	switch m.treeMode {
 	case TreeModeWorktree, TreeModeStaged:
-		return active("Worktree") + "  " + inactive("Branch")
+		return active("Worktree") + "  " + inactive("Branch") + "  " + inactive("PRs")
 	case TreeModeBranchDiff:
 		name := "Branch"
 		if m.branchSelector != nil && m.branchSelector.selectedBranch != "" {
 			name = m.branchSelector.selectedBranch
 		}
-		return inactive("Worktree") + "  " + active(name)
+		return inactive("Worktree") + "  " + active(name) + "  " + inactive("PRs")
 	case TreeModeBranchSelector:
-		return inactive("Worktree") + "  " + active("Branch")
+		return inactive("Worktree") + "  " + active("Branch") + "  " + inactive("PRs")
+	case TreeModePRSelector:
+		return inactive("Worktree") + "  " + inactive("Branch") + "  " + active("PRs")
+	case TreeModePRDiff:
+		name := "PRs"
+		if m.prSelector != nil && m.prSelector.selectedPR != nil {
+			name = fmt.Sprintf("#%d", m.prSelector.selectedPR.Number)
+		}
+		return inactive("Worktree") + "  " + inactive("Branch") + "  " + active(name)
 	default:
 		return ""
 	}
@@ -339,6 +441,11 @@ func (m Model) statusLine() string {
 	modeLabel := m.treeMode.String()
 	if m.treeMode == TreeModeBranchDiff && m.branchSelector != nil {
 		modeLabel = "branch diff: " + m.branchSelector.selectedBranch
+	} else if m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
+		p := m.prSelector.selectedPR
+		modeLabel = fmt.Sprintf("PR #%d: %s", p.Number, p.Title)
+	} else if m.treeMode == TreeModePRSelector {
+		modeLabel = "PR selector"
 	}
 	updateHint := ""
 	if m.showUpdateModal || m.showUpdating {
@@ -372,6 +479,14 @@ func (m Model) helpText() string {
 		key("ctrl+a", "Check / uncheck all"),
 		key("c", "Stage checked items and commit"),
 		key("o", "Push and open pull request"),
+		"",
+		section("PR Review"),
+		key("[ga]", "Approve PR (PR diff view)"),
+		key("[gr]", "Request changes (PR diff view)"),
+		key("[gm]", "Merge PR (PR diff view)"),
+		key("[gd]", "Close PR + delete branch (PR diff view)"),
+		key("o", "Open selected PR in browser"),
+		key("r", "Refresh PR list / PR diff"),
 		"",
 		section("Analysis"),
 		key("a / A", "Overall / detail review"),
