@@ -84,7 +84,7 @@ func runApp(ctx context.Context, configPath string, _ io.Reader, _, _ io.Writer)
 	case "copilot":
 		runner = agent.NewCopilot(cfg.Agent.Command, cfg.Agent.Args, cfg.Agent.ReadOnly, cfg.Agent.AllowExternalTools)
 	case "opencode":
-		runner = agent.NewOpenCode(cfg.Agent.Command, cfg.Agent.Args, cfg.Agent.ReadOnly, cfg.Agent.AllowExternalTools)
+		runner = agent.NewOpenCode(cfg.Agent.Command, cfg.Agent.Args, cfg.Agent.Model, cfg.Agent.ReadOnly, cfg.Agent.AllowExternalTools)
 	case "generic", "claude":
 		runner = agent.NewGeneric(cfg.Agent.Command, cfg.Agent.Args)
 	default:

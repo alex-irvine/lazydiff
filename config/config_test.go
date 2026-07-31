@@ -156,3 +156,27 @@ func TestConfigPathUsesXDGConfigHome(t *testing.T) {
 		t.Fatalf("ConfigPath() = %q, want %q", got, want)
 	}
 }
+
+func TestLoadDecodesModelField(t *testing.T) {
+	path := writeConfig(t, `[agent]
+provider = "opencode"
+model = "anthropic/claude-sonnet-4-20250514"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Agent.Model != "anthropic/claude-sonnet-4-20250514" {
+		t.Fatalf("model = %q, want %q", cfg.Agent.Model, "anthropic/claude-sonnet-4-20250514")
+	}
+}
+
+func TestLoadDefaultModelIsEmpty(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Agent.Model != "" {
+		t.Fatalf("default model = %q, want empty", cfg.Agent.Model)
+	}
+}

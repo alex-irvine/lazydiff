@@ -21,6 +21,7 @@ type AgentConfig struct {
 	Provider           string
 	Command            string
 	Args               []string
+	Model              string
 	ReadOnly           bool
 	AllowExternalTools bool
 	Prompts            PromptConfig
@@ -46,6 +47,7 @@ type fileAgentConfig struct {
 	Provider           *string          `toml:"provider"`
 	Command            *string          `toml:"command"`
 	Args               *[]string        `toml:"args"`
+	Model              *string          `toml:"model"`
 	ReadOnly           *bool            `toml:"read_only"`
 	AllowExternalTools *bool            `toml:"allow_external_tools"`
 	Prompts            filePromptConfig `toml:"prompts"`
@@ -131,6 +133,9 @@ func Load(path string) (Config, error) {
 	}
 	if overlay.Args != nil {
 		cfg.Agent.Args = append([]string(nil), (*overlay.Args)...)
+	}
+	if overlay.Model != nil {
+		cfg.Agent.Model = *overlay.Model
 	}
 	if overlay.ReadOnly != nil {
 		cfg.Agent.ReadOnly = *overlay.ReadOnly

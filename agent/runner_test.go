@@ -98,3 +98,53 @@ func TestCopilotCommandUsesTempPromptAndRestrictiveFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenCodeCommandPassesModelFlag(t *testing.T) {
+	recordDir := t.TempDir()
+	argvPath := filepath.Join(recordDir, "argv")
+	command := filepath.Join(recordDir, "opencode.sh")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >\"$ARGV_FILE\"\nprintf 'ok\\n'"
+	if err := os.WriteFile(command, []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ARGV_FILE", argvPath)
+	runner := NewOpenCode(command, []string{"run"}, "anthropic/claude-sonnet-4-20250514", true, false)
+	err := runner.Run(context.Background(), Request{RepoRoot: recordDir, Prompt: "prompt"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(args)
+	for _, wanted := range []string{"--pure", "--model", "anthropic/claude-sonnet-4-20250514", "run", "--auto"} {
+		if !strings.Contains(text, wanted) {
+			t.Fatalf("argv missing %q: %s", wanted, text)
+		}
+	}
+}
+
+func TestOpenCodeCommandOmitsModelFlagWhenEmpty(t *testing.T) {
+	recordDir := t.TempDir()
+	argvPath := filepath.Join(recordDir, "argv")
+	command := filepath.Join(recordDir, "opencode.sh")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >\"$ARGV_FILE\"\nprintf 'ok\\n'"
+	if err := os.WriteFile(command, []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ARGV_FILE", argvPath)
+	runner := NewOpenCode(command, []string{"run"}, "", true, false)
+	err := runner.Run(context.Background(), Request{RepoRoot: recordDir, Prompt: "prompt"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(args)
+	if strings.Contains(text, "--model") {
+		t.Fatalf("argv should not contain --model when empty: %s", text)
+	}
+}
