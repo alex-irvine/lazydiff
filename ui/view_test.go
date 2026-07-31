@@ -138,7 +138,36 @@ func TestStatusLineShowsTreeMode(t *testing.T) {
 	}
 }
 
-func TestStatusLineShowsSearchIndicatorWhenActive(t *testing.T) {
+func TestTabBarHasNumberPrefix(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.treeMode = TreeModeWorktree
+	bar := model.renderTabBar()
+	if !strings.Contains(bar, "[1]") {
+		t.Fatalf("tab bar missing [1] prefix: %s", bar)
+	}
+}
+
+func TestSearchIndicatorRendersInTreePane(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	model.searchActive = true
+	model.searchQuery = "a.go"
+	treePane := model.renderTree(model.layout.Files)
+	if !strings.Contains(treePane, "/a.go_") || !strings.Contains(treePane, "[n]") || !strings.Contains(treePane, "[N]") {
+		t.Fatalf("expected search indicator in tree pane:\n%s", treePane)
+	}
+}
+
+func TestSearchIndicatorNotInStatusLine(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	model.termW, model.termH = 120, 40
 	model.layout = ComputeLayout(120, 40)
@@ -148,8 +177,8 @@ func TestStatusLineShowsSearchIndicatorWhenActive(t *testing.T) {
 	model.searchActive = true
 	model.searchQuery = "a.go"
 	line := model.statusLine()
-	if !strings.Contains(line, "/a.go_") || !strings.Contains(line, "n") || !strings.Contains(line, "N") {
-		t.Fatalf("expected search indicator in status line:\n%s", line)
+	if strings.Contains(line, "/a.go_") {
+		t.Fatalf("search indicator should not be in status line:\n%s", line)
 	}
 }
 

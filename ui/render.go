@@ -143,6 +143,10 @@ func (m Model) renderTree(r Rect) string {
 	title := m.renderTabBar()
 	titleRendered := delta.Truncate(title, max(1, r.W-2))
 	lines := []string{titleRendered}
+	if m.searchActive {
+		searchBar := "/" + m.searchQuery + "_  [n]next [N]prev [esc]cancel"
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("228")).Render(delta.Truncate(searchBar, max(1, r.W-2))))
+	}
 	nodes := m.visibleNodes()
 	if len(nodes) == 0 {
 		empty := delta.Truncate(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("(no changes)"), max(1, r.W-2))
@@ -296,23 +300,23 @@ func (m Model) renderTabBar() string {
 	inactive := lipgloss.NewStyle().Foreground(dim).Render
 	switch m.treeMode {
 	case TreeModeWorktree, TreeModeStaged:
-		return active("Worktree") + "  " + inactive("Branch") + "  " + inactive("PRs")
+		return active("[1] Worktree") + "  " + inactive("Branch") + "  " + inactive("PRs")
 	case TreeModeBranchDiff:
 		name := "Branch"
 		if m.branchSelector != nil && m.branchSelector.selectedBranch != "" {
 			name = m.branchSelector.selectedBranch
 		}
-		return inactive("Worktree") + "  " + active(name) + "  " + inactive("PRs")
+		return inactive("[1] Worktree") + "  " + active(name) + "  " + inactive("PRs")
 	case TreeModeBranchSelector:
-		return inactive("Worktree") + "  " + active("Branch") + "  " + inactive("PRs")
+		return inactive("[1] Worktree") + "  " + active("Branch") + "  " + inactive("PRs")
 	case TreeModePRSelector:
-		return inactive("Worktree") + "  " + inactive("Branch") + "  " + active("PRs")
+		return inactive("[1] Worktree") + "  " + inactive("Branch") + "  " + active("PRs")
 	case TreeModePRDiff:
 		name := "PRs"
 		if m.prSelector != nil && m.prSelector.selectedPR != nil {
 			name = fmt.Sprintf("#%d", m.prSelector.selectedPR.Number)
 		}
-		return inactive("Worktree") + "  " + inactive("Branch") + "  " + active(name)
+		return inactive("[1] Worktree") + "  " + inactive("Branch") + "  " + active(name)
 	default:
 		return ""
 	}
@@ -453,11 +457,7 @@ func (m Model) statusLine() string {
 	} else if m.updateVersion != "" {
 		updateHint = "  [u] update v" + m.updateVersion
 	}
-	searchInfo := ""
-	if m.searchActive {
-		searchInfo = "  /" + m.searchQuery + "_  [n]next [N]prev [esc]cancel"
-	}
-	return fmt.Sprintf("mode: %s  %s  %s%s  [1-3] pane  [space] check  [c] commit  [o] PR  [?] help  [q] quit%s  %s", modeLabel, deltaState, m.status, searchInfo, updateHint, version.Current)
+	return fmt.Sprintf("mode: %s  %s  %s  [1-3] pane  [space] check  [c] commit  [o] PR  [?] help  [q] quit%s  %s", modeLabel, deltaState, m.status, updateHint, version.Current)
 }
 
 func (m Model) helpText() string {
