@@ -453,7 +453,11 @@ func (m Model) statusLine() string {
 	} else if m.updateVersion != "" {
 		updateHint = "  [u] update v" + m.updateVersion
 	}
-	return fmt.Sprintf("mode: %s  %s  %s  %s%s  %s", modeLabel, deltaState, m.status, "[1-3] pane  [space] check  [c] commit  [o] PR  [?] help  [q] quit", updateHint, version.Current)
+	searchInfo := ""
+	if m.searchActive {
+		searchInfo = "  /" + m.searchQuery + "_  [n]next [N]prev [esc]cancel"
+	}
+	return fmt.Sprintf("mode: %s  %s  %s%s  [1-3] pane  [space] check  [c] commit  [o] PR  [?] help  [q] quit%s  %s", modeLabel, deltaState, m.status, searchInfo, updateHint, version.Current)
 }
 
 func (m Model) helpText() string {
