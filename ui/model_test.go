@@ -330,14 +330,6 @@ func (f *fakePRReviewer) ListPRs(_ context.Context, state string) ([]pr.PR, erro
 	return f.prs, f.err
 }
 
-func (f *fakePRReviewer) PR(_ context.Context, number int) (pr.PR, error) {
-	return pr.PR{Number: number}, f.err
-}
-
-func (f *fakePRReviewer) PRDiff(_ context.Context, number int) (string, error) {
-	return fmt.Sprintf("diff-for-%d", number), f.err
-}
-
 func (f *fakePRReviewer) Approve(_ context.Context, number int, comment string) error {
 	f.approved = append(f.approved, number)
 	f.commented = append(f.commented, comment)
@@ -363,6 +355,19 @@ func (f *fakePRReviewer) Close(_ context.Context, number int) error {
 func (f *fakePRReviewer) DeleteBranch(_ context.Context, branch string) error {
 	f.deleted = append(f.deleted, branch)
 	return f.err
+}
+
+// fakeDeleteBranchFailingReviewer wraps fakePRReviewer so Close can succeed
+// while DeleteBranch fails independently (fakePRReviewer alone can't express
+// that, since both share a single f.err).
+type fakeDeleteBranchFailingReviewer struct {
+	*fakePRReviewer
+	deleteErr error
+}
+
+func (f *fakeDeleteBranchFailingReviewer) DeleteBranch(_ context.Context, branch string) error {
+	f.deleted = append(f.deleted, branch)
+	return f.deleteErr
 }
 
 func makeSnapshot(id string) git.Snapshot {
@@ -907,12 +912,234 @@ func TestGKeyInPRDiffStillScrollsWhenFocusIsDiff(t *testing.T) {
 	}
 }
 
+func TestPendingPRKeyClearsOnUnrelatedKeypress(t *testing.T) {
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	if model.pendingPRKey != 'g' {
+		t.Fatalf("pendingPRKey = %c, want g", model.pendingPRKey)
+	}
+	// an unrelated keypress (not a/m/d/r) must clear the pending flag
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	if model.pendingPRKey != 0 {
+		t.Fatalf("pendingPRKey = %c after unrelated key, want cleared", model.pendingPRKey)
+	}
+	// a subsequent 'a' must NOT be treated as the second half of a stale g-sequence
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	if model.confirm != nil {
+		t.Fatalf("confirm = %+v, want nil (stale g-sequence must not fire)", model.confirm)
+	}
+}
+
+func TestConfirmDialogStaysOpenAndShowsErrorOnActionFailure(t *testing.T) {
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{err: fmt.Errorf("gh: unauthorized")})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	if model.confirm == nil {
+		t.Fatal("expected merge confirm dialog to be open")
+	}
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if model.confirm == nil {
+		t.Fatal("confirm dialog closed immediately on ctrl+s; should stay open until the result arrives")
+	}
+	if cmd == nil {
+		t.Fatal("expected confirmPRActionCmd")
+	}
+	msg := cmd()
+	model, _ = model.Update(msg)
+	if model.confirm == nil || model.confirm.Err == nil {
+		t.Fatalf("confirm = %+v, want non-nil with Err set after failure", model.confirm)
+	}
+}
+
+func TestConfirmDialogClosesOnActionSuccess(t *testing.T) {
+	reviewer := &fakePRReviewer{}
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, reviewer)
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	msg := cmd()
+	model, _ = model.Update(msg)
+	if model.confirm != nil {
+		t.Fatalf("confirm = %+v, want nil after success", model.confirm)
+	}
+	if len(reviewer.approved) != 1 || reviewer.approved[0] != 42 {
+		t.Fatalf("reviewer.approved = %v, want [42]", reviewer.approved)
+	}
+}
+
+func TestRequestChangesDialogStaysOpenOnActionFailure(t *testing.T) {
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{err: fmt.Errorf("gh: unauthorized")})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model.dialog.SetDraft("needs tests", nil)
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if model.dialog == nil {
+		t.Fatal("dialog closed immediately on ctrl+s; should stay open until the result arrives")
+	}
+	msg := cmd()
+	model, _ = model.Update(msg)
+	if model.dialog == nil || model.dialog.Err == nil {
+		t.Fatalf("dialog = %+v, want non-nil with Err set after failure", model.dialog)
+	}
+}
+
+func TestRequestChangesDialogClosesAndCallsReviewerOnSuccess(t *testing.T) {
+	reviewer := &fakePRReviewer{}
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, reviewer)
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model.dialog.SetDraft("needs tests", nil)
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	msg := cmd()
+	model, _ = model.Update(msg)
+	if model.dialog != nil {
+		t.Fatalf("dialog = %+v, want nil after success", model.dialog)
+	}
+	if len(reviewer.requested) != 1 || reviewer.requested[0] != 42 || reviewer.commented[0] != "needs tests" {
+		t.Fatalf("reviewer requested=%v commented=%v", reviewer.requested, reviewer.commented)
+	}
+}
+
+func TestMergeConfirmCallsReviewerMerge(t *testing.T) {
+	reviewer := &fakePRReviewer{}
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, reviewer)
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	cmd()
+	if len(reviewer.merged) != 1 || reviewer.merged[0] != 42 {
+		t.Fatalf("reviewer.merged = %v, want [42]", reviewer.merged)
+	}
+}
+
+func TestCloseConfirmCallsReviewerCloseAndDeleteBranch(t *testing.T) {
+	reviewer := &fakePRReviewer{}
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, reviewer)
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	cmd()
+	if len(reviewer.closed) != 1 || reviewer.closed[0] != 42 {
+		t.Fatalf("reviewer.closed = %v, want [42]", reviewer.closed)
+	}
+	if len(reviewer.deleted) != 1 || reviewer.deleted[0] != "feat-login" {
+		t.Fatalf("reviewer.deleted = %v, want [feat-login]", reviewer.deleted)
+	}
+}
+
+func TestCloseConfirmSurfacesDeleteBranchFailureAsWarningNotSilent(t *testing.T) {
+	reviewer := &fakeDeleteBranchFailingReviewer{fakePRReviewer: &fakePRReviewer{}, deleteErr: fmt.Errorf("remote branch protected")}
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, reviewer)
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	msg := cmd()
+	model, _ = model.Update(msg)
+	if model.confirm != nil {
+		t.Fatalf("confirm = %+v, want nil (Close itself succeeded)", model.confirm)
+	}
+	if !strings.Contains(model.status, "remote branch protected") {
+		t.Fatalf("status = %q, want it to mention the delete-branch failure", model.status)
+	}
+}
+
+func TestHKeyFromPRSelectorGoesToBranchSelector(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.treeMode = TreeModePRSelector
+	model.prSelector = NewPRSelector(makeTestPRs())
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	if model.treeMode != TreeModeBranchSelector {
+		t.Fatalf("treeMode = %d, want BranchSelector", model.treeMode)
+	}
+}
+
+func TestLKeyInPRSelectorOpensSelectedPR(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.treeMode = TreeModePRSelector
+	model.prSelector = NewPRSelector(makeTestPRs())
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if cmd == nil {
+		t.Fatal("expected openSelectedPRCmd")
+	}
+	msg := cmd()
+	diffMsg, ok := msg.(prDiffLoadedMsg)
+	if !ok || diffMsg.Number != 42 {
+		t.Fatalf("msg = %+v", msg)
+	}
+}
+
+func TestRKeyInPRSelectorRefreshesPRList(t *testing.T) {
+	reviewer := &fakePRReviewer{prs: makeTestPRs()}
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.treeMode = TreeModePRSelector
+	model.prSelector = NewPRSelector(nil)
+	model.prReviewer = reviewer
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if cmd == nil {
+		t.Fatal("expected loadPRsCmd")
+	}
+	msg := cmd()
+	prsMsg, ok := msg.(prsLoadedMsg)
+	if !ok || len(prsMsg.PRs) != 2 {
+		t.Fatalf("msg = %+v, want prsLoadedMsg with 2 PRs", msg)
+	}
+}
+
+func TestRKeyInPRDiffRefreshesAndUpdatesDiffCache(t *testing.T) {
+	fresh := makeSnapshot("fresh")
+	loader := &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}, prSnapshots: map[int]git.Snapshot{42: fresh}}
+	model := modelInPRDiff(t, loader, &fakePRReviewer{})
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if cmd == nil {
+		t.Fatal("expected a refresh command")
+	}
+	msg := cmd()
+	diffMsg, ok := msg.(prDiffLoadedMsg)
+	if !ok || diffMsg.Number != 42 || diffMsg.Snapshot.ID != "fresh" {
+		t.Fatalf("msg = %+v, want prDiffLoadedMsg{Number:42, Snapshot.ID:fresh}", msg)
+	}
+	model, _ = model.Update(diffMsg)
+	if model.prSelector.diffCache[42].ID != "fresh" {
+		t.Fatalf("diffCache[42] = %+v, want the fresh snapshot to replace the cache entry", model.prSelector.diffCache[42])
+	}
+}
+
+func TestOKeyInPRDiffOpensPRURLInBrowser(t *testing.T) {
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{})
+	model.prSelector.prs[0].URL = "https://github.com/alex-irvine/lazydiff/pull/42"
+	model.prSelector.Select(42) // re-select so selectedPR picks up the URL just set
+	opener := &fakeOpener{}
+	model.opener = opener
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	if cmd == nil {
+		t.Fatal("expected a command to open the PR URL")
+	}
+	cmd()
+	if len(opener.urls) != 1 || opener.urls[0] != "https://github.com/alex-irvine/lazydiff/pull/42" {
+		t.Fatalf("opener.urls = %v", opener.urls)
+	}
+}
+
 func TestGThenRInPRDiffOpensRequestDialog(t *testing.T) {
 	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{})
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	if model.dialog == nil || model.dialog.Kind != RequestChangesDialog || !model.dialog.Ready {
 		t.Fatalf("dialog = %+v", model.dialog)
+	}
+}
+
+func TestCtrlROnRequestChangesDialogIsNoOp(t *testing.T) {
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model.dialog.SetDraft("needs tests", nil)
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if cmd != nil {
+		t.Fatal("ctrl+r on RequestChangesDialog should not start any command")
+	}
+	if model.dialog == nil || model.dialog.Text() != "needs tests" {
+		t.Fatalf("dialog = %+v, want unchanged draft", model.dialog)
 	}
 }
 

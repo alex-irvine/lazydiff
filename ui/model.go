@@ -77,8 +77,6 @@ type Mutator interface {
 // validate github.com per impl.
 type PRReviewer interface {
 	ListPRs(context.Context, string) ([]pr.PR, error)
-	PR(context.Context, int) (pr.PR, error)
-	PRDiff(context.Context, int) (string, error)
 	Approve(context.Context, int, string) error
 	RequestChanges(context.Context, int, string) error
 	Merge(context.Context, int) error
@@ -208,7 +206,8 @@ type prDiffLoadedMsg struct {
 }
 
 type prActionDoneMsg struct {
-	Err error
+	Err     error
+	Warning string
 }
 
 // Renderer is the small dependency required by Model; delta.Renderer satisfies it.
@@ -312,6 +311,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case prActionDoneMsg:
 		if message.Err != nil {
 			m.status = "pr action error: " + message.Err.Error()
+			// Keep whichever dialog is open, with the error attached, so the
+			// user can see what failed and retry or cancel instead of the
+			// dialog silently vanishing.
+			if m.confirm != nil {
+				m.confirm.Err = message.Err
+			}
+			if m.dialog != nil {
+				m.dialog.Err = message.Err
+			}
+			return m, nil
+		}
+		m.confirm = nil
+		m.dialog = nil
+		if message.Warning != "" {
+			m.status = message.Warning
 		} else {
 			m.status = "pr action complete"
 		}
@@ -523,7 +537,9 @@ func (m Model) confirmDialogCmd() (Model, tea.Cmd) {
 		title, body := splitSubjectBody(text)
 		return m, m.confirmPRCmd(title, body)
 	case RequestChangesDialog:
-		m.dialog = nil
+		// Stay open until prActionDoneMsg arrives (mirrors ClosePRDialog /
+		// ApproveDialog / MergeDialog); closed there on success, error
+		// attached and dialog kept open on failure.
 		if m.prReviewer == nil || m.prSelector == nil || m.prSelector.selectedPR == nil {
 			return m, nil
 		}
@@ -543,9 +559,9 @@ func (m Model) updateConfirmKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		m.confirm = nil
 		return m, nil
 	case ActionConfirm:
-		kind := m.confirm.Kind
-		m.confirm = nil
-		return m, m.confirmPRActionCmd(kind)
+		// Stay open until prActionDoneMsg arrives — closing here would hide
+		// a failure behind a status-line message that's easy to miss.
+		return m, m.confirmPRActionCmd(m.confirm.Kind)
 	}
 	return m, nil
 }
@@ -571,7 +587,12 @@ func (m Model) confirmPRActionCmd(kind DialogKind) tea.Cmd {
 			if err := reviewer.Close(context.Background(), num); err != nil {
 				return prActionDoneMsg{Err: err}
 			}
-			_ = reviewer.DeleteBranch(context.Background(), head) // best effort
+			// Close succeeded — treat branch deletion as best-effort, but
+			// surface a failure as a distinguishable warning rather than
+			// swallowing it: a stale remote branch needs manual cleanup.
+			if err := reviewer.DeleteBranch(context.Background(), head); err != nil {
+				return prActionDoneMsg{Warning: fmt.Sprintf("closed PR #%d but failed to delete branch %q: %v", num, head, err)}
+			}
 			return prActionDoneMsg{}
 		}
 	}
@@ -587,6 +608,11 @@ func (m Model) regenerateDialogCmd() (Model, tea.Cmd) {
 		return m, m.startCommitCmd()
 	case PRDialog:
 		return m, m.startPRCmd()
+	case RequestChangesDialog:
+		// No-op by design: this is a hand-written comment, not an
+		// AI-generated draft — there's nothing to regenerate (ctrl+r
+		// regenerate is also omitted from its hint text in renderDialog).
+		return m, nil
 	}
 	return m, nil
 }
@@ -622,6 +648,11 @@ func (m Model) confirmPRCmd(title, body string) tea.Cmd {
 }
 
 func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
+	// pendingPRKey ('g'-prefix for ga/gr/gm/gd) is only valid for the very
+	// next keypress; clear it here unconditionally so it can never leak
+	// into an unrelated later keystroke. Only "g" itself re-arms it below.
+	pendingG := m.pendingPRKey == 'g'
+	m.pendingPRKey = 0
 	switch key.String() {
 	case "tab":
 		m.focus = (m.focus + 1) % 3
@@ -692,6 +723,10 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			m.treeMode = TreeModePRSelector
 			return m, nil
 		}
+		if m.focus == FocusTree && m.treeMode == TreeModePRSelector {
+			m.treeMode = TreeModeBranchSelector
+			return m, nil
+		}
 		if m.focus == FocusTree && m.treeMode == TreeModeBranchDiff {
 			m.treeMode = TreeModeBranchSelector
 			return m, nil
@@ -702,6 +737,13 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			return m, m.renderSelectedCmd()
 		}
 	case "l":
+		if m.focus == FocusTree && m.treeMode == TreeModePRSelector && m.prSelector != nil {
+			p := m.prSelector.Selected()
+			if p != nil {
+				m.prSelector.Select(p.Number)
+				return m, m.openSelectedPRCmd()
+			}
+		}
 		if m.focus == FocusTree && m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
 			branch := m.branchSelector.Selected()
 			if branch != "" {
@@ -765,8 +807,7 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case "3":
 		m.focus = FocusAnalysis
 	case "a":
-		if m.pendingPRKey == 'g' && m.focus == FocusTree && m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
-			m.pendingPRKey = 0
+		if pendingG && m.focus == FocusTree && m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
 			num := m.prSelector.selectedPR.Number
 			title := m.prSelector.selectedPR.Title
 			m.confirm = NewConfirmDialog(ApproveDialog, fmt.Sprintf("Approve PR #%d (%s)", num, title))
@@ -790,21 +831,22 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			return m, m.startCommitCmd()
 		}
 	case "o":
+		if m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
+			return m, m.openPRInBrowserCmd()
+		}
 		if m.treeMode == TreeModeBranchDiff && m.branchSelector != nil && m.branchSelector.selectedBranch != "" {
 			return m, m.startPRForReviewedBranchCmd()
 		}
 		return m, m.startPRCmd()
 	case "m":
-		if m.pendingPRKey == 'g' && m.focus == FocusTree && m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
-			m.pendingPRKey = 0
+		if pendingG && m.focus == FocusTree && m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
 			num := m.prSelector.selectedPR.Number
 			title := m.prSelector.selectedPR.Title
 			m.confirm = NewConfirmDialog(MergeDialog, fmt.Sprintf("Merge PR #%d (%s)", num, title))
 		}
 		return m, nil
 	case "d":
-		if m.pendingPRKey == 'g' && m.focus == FocusTree && m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
-			m.pendingPRKey = 0
+		if pendingG && m.focus == FocusTree && m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
 			num := m.prSelector.selectedPR.Number
 			title := m.prSelector.selectedPR.Title
 			head := m.prSelector.selectedPR.HeadRefName
@@ -812,12 +854,14 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	case "r":
-		if m.pendingPRKey == 'g' && m.focus == FocusTree && m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
-			m.pendingPRKey = 0
+		if pendingG && m.focus == FocusTree && m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
 			d := NewActionDialog(RequestChangesDialog)
 			d.SetDraft("", nil)
 			m.dialog = d
 			return m, nil
+		}
+		if m.focus == FocusTree && m.treeMode == TreeModePRSelector {
+			return m, m.loadPRsCmd()
 		}
 		return m, m.refreshCmd()
 	case "g":
@@ -875,14 +919,17 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) refreshCmd() tea.Cmd {
 	if m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
+		// Route through prDiffLoadedMsg (not a bare snapshotMsg) so its
+		// handler refreshes prSelector.diffCache[num] too — otherwise a
+		// stale cache entry would resurface on the next h → enter.
 		loader := m.loader
 		num := m.prSelector.selectedPR.Number
 		return func() tea.Msg {
 			snapshot, err := loader.SnapshotPR(context.Background(), num)
 			if err != nil {
-				return snapshotErrorMsg{Err: err}
+				return prDiffLoadedMsg{Number: num, Err: err}
 			}
-			return snapshotMsg{Snapshot: snapshot}
+			return prDiffLoadedMsg{Number: num, Snapshot: snapshot}
 		}
 	}
 	if m.treeMode == TreeModeBranchDiff && m.branchSelector != nil && m.branchSelector.selectedBranch != "" {
@@ -936,6 +983,17 @@ func (m Model) loadPRsCmd() tea.Cmd {
 		}
 		prs, err := reviewer.ListPRs(context.Background(), "open")
 		return prsLoadedMsg{PRs: prs, Err: err}
+	}
+}
+
+func (m Model) openPRInBrowserCmd() tea.Cmd {
+	if m.prSelector == nil || m.prSelector.selectedPR == nil || m.opener == nil {
+		return nil
+	}
+	opener := m.opener
+	url := m.prSelector.selectedPR.URL
+	return func() tea.Msg {
+		return prResultMsg{Err: opener.Open(context.Background(), url)}
 	}
 }
 
