@@ -12,6 +12,7 @@ import (
 	"github.com/alex-irvine/lazydiff/delta"
 	"github.com/alex-irvine/lazydiff/diff"
 	"github.com/alex-irvine/lazydiff/git"
+	"github.com/alex-irvine/lazydiff/pr"
 	"github.com/alex-irvine/lazydiff/prompt"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -215,7 +216,9 @@ func TestComputeLayoutCapsLeftRail(t *testing.T) {
 type fakeLoader struct {
 	snapshots       []git.Snapshot
 	branchSnapshots map[string]git.Snapshot
+	prSnapshots     map[int]git.Snapshot
 	index           int
+	prCalls         int
 }
 
 func (f *fakeLoader) Snapshot(context.Context, git.Mode) (git.Snapshot, error) {
@@ -229,6 +232,16 @@ func (f *fakeLoader) Snapshot(context.Context, git.Mode) (git.Snapshot, error) {
 func (f *fakeLoader) SnapshotBranch(_ context.Context, branch string) (git.Snapshot, error) {
 	if f.branchSnapshots != nil {
 		if s, ok := f.branchSnapshots[branch]; ok {
+			return s, nil
+		}
+	}
+	return f.snapshots[0], nil
+}
+
+func (f *fakeLoader) SnapshotPR(_ context.Context, number int) (git.Snapshot, error) {
+	f.prCalls++
+	if f.prSnapshots != nil {
+		if s, ok := f.prSnapshots[number]; ok {
 			return s, nil
 		}
 	}
@@ -300,6 +313,58 @@ func (f *fakeOpener) Open(_ context.Context, rawURL string) error {
 	return f.err
 }
 
+type fakePRReviewer struct {
+	prs       []pr.PR
+	listState string
+	approved  []int
+	commented []string
+	requested []int
+	merged    []int
+	closed    []int
+	deleted   []string
+	err       error
+}
+
+func (f *fakePRReviewer) ListPRs(_ context.Context, state string) ([]pr.PR, error) {
+	f.listState = state
+	return f.prs, f.err
+}
+
+func (f *fakePRReviewer) PR(_ context.Context, number int) (pr.PR, error) {
+	return pr.PR{Number: number}, f.err
+}
+
+func (f *fakePRReviewer) PRDiff(_ context.Context, number int) (string, error) {
+	return fmt.Sprintf("diff-for-%d", number), f.err
+}
+
+func (f *fakePRReviewer) Approve(_ context.Context, number int, comment string) error {
+	f.approved = append(f.approved, number)
+	f.commented = append(f.commented, comment)
+	return f.err
+}
+
+func (f *fakePRReviewer) RequestChanges(_ context.Context, number int, body string) error {
+	f.requested = append(f.requested, number)
+	f.commented = append(f.commented, body)
+	return f.err
+}
+
+func (f *fakePRReviewer) Merge(_ context.Context, number int) error {
+	f.merged = append(f.merged, number)
+	return f.err
+}
+
+func (f *fakePRReviewer) Close(_ context.Context, number int) error {
+	f.closed = append(f.closed, number)
+	return f.err
+}
+
+func (f *fakePRReviewer) DeleteBranch(_ context.Context, branch string) error {
+	f.deleted = append(f.deleted, branch)
+	return f.err
+}
+
 func makeSnapshot(id string) git.Snapshot {
 	files := testFiles()
 	files[0].Raw = "diff --git a/a.go b/a.go\n@@ -1 +1 @@\n-old\n+new\n"
@@ -318,7 +383,17 @@ func newTestModel(loader SnapshotLoader, runner agent.Runner) Model {
 	if err != nil {
 		panic(err)
 	}
-	return NewModel(git.Repository{Root: "/repo"}, cfg, loader, fakeRenderer{}, runner, templates, &fakeMutator{}, &fakeOpener{})
+	return NewModel(git.Repository{Root: "/repo"}, cfg, loader, fakeRenderer{}, runner, templates, &fakeMutator{}, &fakeOpener{}, &fakePRReviewer{})
+}
+
+func modelInPRDiff(t *testing.T, loader SnapshotLoader, reviewer PRReviewer) Model {
+	t.Helper()
+	model := newTestModel(loader, &fakeRunner{})
+	model.treeMode = TreeModePRDiff
+	model.prSelector = NewPRSelector(makeTestPRs())
+	model.prSelector.Select(42)
+	model.prReviewer = reviewer
+	return model
 }
 
 func TestModelRefreshAndAnalysisContext(t *testing.T) {
@@ -763,22 +838,100 @@ func TestDialogCapturesKeysBeforeTreeNavigation(t *testing.T) {
 	}
 }
 
-func TestTreeModeCyclesWithBracketKeys(t *testing.T) {
+func TestTreeModeCyclesThroughPRSelector(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	if model.treeMode != TreeModeWorktree {
 		t.Fatalf("initial treeMode = %d, want Worktree", model.treeMode)
 	}
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
 	if model.treeMode != TreeModeBranchSelector {
-		t.Fatalf("after ] treeMode = %d, want BranchSelector", model.treeMode)
+		t.Fatalf("after first ] treeMode = %d, want BranchSelector", model.treeMode)
+	}
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if model.treeMode != TreeModePRSelector {
+		t.Fatalf("after second ] treeMode = %d, want PRSelector", model.treeMode)
+	}
+	if cmd == nil {
+		t.Fatal("expected loadPRsCmd on entering PR selector")
 	}
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
 	if model.treeMode != TreeModeWorktree {
-		t.Fatalf("after second ] treeMode = %d, want Worktree", model.treeMode)
+		t.Fatalf("after third ] treeMode = %d, want Worktree (wrap)", model.treeMode)
 	}
+}
+
+func TestTreeModeCyclesBackFromPRSelector(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
 	if model.treeMode != TreeModeBranchSelector {
-		t.Fatalf("after [ treeMode = %d, want BranchSelector", model.treeMode)
+		t.Fatalf("[ from PR selector treeMode = %d, want BranchSelector", model.treeMode)
+	}
+}
+
+func TestGKeyThenMOpenMergeConfirmDialog(t *testing.T) {
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	if model.confirm == nil || model.confirm.Kind != MergeDialog {
+		t.Fatalf("confirm = %+v", model.confirm)
+	}
+}
+
+func TestGKeyThenDOpenCloseConfirmDialog(t *testing.T) {
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if model.confirm == nil || model.confirm.Kind != ClosePRDialog {
+		t.Fatalf("confirm = %+v", model.confirm)
+	}
+}
+
+func TestGKeyThenAOpenApproveConfirmDialog(t *testing.T) {
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	if model.confirm == nil || model.confirm.Kind != ApproveDialog {
+		t.Fatalf("confirm = %+v", model.confirm)
+	}
+}
+
+func TestGKeyInPRDiffStillScrollsWhenFocusIsDiff(t *testing.T) {
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{})
+	model.focus = FocusDiff
+	model.diffScroll = 5
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	if model.diffScroll != 0 {
+		t.Fatal("g did not scroll diff to 0")
+	}
+}
+
+func TestGThenRInPRDiffOpensRequestDialog(t *testing.T) {
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if model.dialog == nil || model.dialog.Kind != RequestChangesDialog || !model.dialog.Ready {
+		t.Fatalf("dialog = %+v", model.dialog)
+	}
+}
+
+func TestEnterOnPRSelectorLoadsPRDiff(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.treeMode = TreeModePRSelector
+	model.prSelector = NewPRSelector(makeTestPRs())
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected openSelectedPRCmd")
+	}
+	msg := cmd()
+	diffMsg, ok := msg.(prDiffLoadedMsg)
+	if !ok || diffMsg.Number != 42 {
+		t.Fatalf("msg = %+v", msg)
+	}
+	model, _ = model.Update(diffMsg)
+	if model.treeMode != TreeModePRDiff {
+		t.Fatalf("treeMode = %d, want PRDiff", model.treeMode)
 	}
 }
 
