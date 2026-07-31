@@ -322,7 +322,7 @@ func TestPTYPRReviewApproveFlow(t *testing.T) {
 case "$1 $2" in
 "pr list") echo '[{"number":42,"title":"feat: add login","author":"alex","headRefName":"feat-login","baseRefName":"main","mergeable":"MERGEABLE","url":"https://github.com/alex-irvine/lazydiff/pull/42","createdAt":"2026-07-01T00:00:00Z"}]';;
 "pr view") echo '{"number":42,"title":"feat: add login","author":"alex","headRefName":"feat-login","baseRefName":"main","mergeable":"MERGEABLE","url":"https://github.com/alex-irvine/lazydiff/pull/42","createdAt":"2026-07-01T00:00:00Z"}';;
-"pr diff") printf 'diff --git a/login.go b/login.go\nnew file mode 100644\n--- /dev/null\n+++ b/login.go\n@@ -0,0 +1 @@\n+func login() {}\n';;
+"pr diff") echo "pr diff $3" >> "$GH_LOG"; printf 'diff --git a/login.go b/login.go\nnew file mode 100644\n--- /dev/null\n+++ b/login.go\n@@ -0,0 +1 @@\n+func login() {}\n';;
 "pr review") echo "$@" >> "$GH_LOG";;
 esac
 `)
@@ -405,5 +405,8 @@ esac
 	}
 	if !strings.Contains(string(logData), "pr review 42 --approve") {
 		t.Fatalf("expected approve invocation, gh log = %q", logData)
+	}
+	if got := strings.Count(string(logData), "pr diff 42"); got != 1 {
+		t.Fatalf("gh pr diff invoked %d times, want exactly 1 (second view must hit prSelector.diffCache): gh log = %q", got, logData)
 	}
 }
