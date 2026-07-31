@@ -40,3 +40,32 @@ func TestActionDialogNotReadyUntilSetDraft(t *testing.T) {
 		t.Fatal("dialog should be ready after SetDraft")
 	}
 }
+
+func TestConfirmDialogEscCancels(t *testing.T) {
+	d := NewConfirmDialog(ApproveDialog, "Approve PR #42 (feat: add login)")
+	if action, _ := d.Update(tea.KeyMsg{Type: tea.KeyEsc}); action != ActionCancel {
+		t.Fatalf("esc action = %v", action)
+	}
+}
+
+func TestConfirmDialogCtrlSConfirms(t *testing.T) {
+	d := NewConfirmDialog(MergeDialog, "Merge PR #42 (feat: add login)")
+	if action, _ := d.Update(tea.KeyMsg{Type: tea.KeyCtrlS}); action != ActionConfirm {
+		t.Fatalf("ctrl+s action = %v", action)
+	}
+}
+
+func TestConfirmDialogStoresTitleAndKind(t *testing.T) {
+	d := NewConfirmDialog(ClosePRDialog, "Close PR #42 (feat: add login) + delete branch feat-login")
+	if d.Kind != ClosePRDialog || d.Title != "Close PR #42 (feat: add login) + delete branch feat-login" {
+		t.Fatalf("dialog = %+v", d)
+	}
+}
+
+func TestRequestChangesDialogKindReadyImmediately(t *testing.T) {
+	d := NewActionDialog(RequestChangesDialog)
+	d.SetDraft("", nil)
+	if !d.Ready || d.Err != nil {
+		t.Fatalf("ready = %v, err = %v", d.Ready, d.Err)
+	}
+}

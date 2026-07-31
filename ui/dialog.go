@@ -10,6 +10,10 @@ type DialogKind int
 const (
 	CommitDialog DialogKind = iota
 	PRDialog
+	ApproveDialog
+	RequestChangesDialog
+	MergeDialog
+	ClosePRDialog
 )
 
 // ActionDialog shows AI-generated text (a commit message, or a PR
@@ -72,4 +76,31 @@ func (d *ActionDialog) View() string {
 
 func (d *ActionDialog) Text() string {
 	return d.Textarea.Value()
+}
+
+// ConfirmDialog is a simple title + hint modal with no editable text,
+// used for approve/merge/close+delete confirmations. Err holds a
+// mutation failure, if any (the dialog stays open so the user can retry
+// or cancel).
+type ConfirmDialog struct {
+	Kind  DialogKind
+	Title string
+	Err   error
+}
+
+func NewConfirmDialog(kind DialogKind, title string) *ConfirmDialog {
+	return &ConfirmDialog{Kind: kind, Title: title}
+}
+
+// Update maps esc/ctrl+s onto DialogAction; every other key is ignored.
+func (d *ConfirmDialog) Update(msg tea.Msg) (DialogAction, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "esc":
+			return ActionCancel, nil
+		case "ctrl+s":
+			return ActionConfirm, nil
+		}
+	}
+	return ActionNone, nil
 }
