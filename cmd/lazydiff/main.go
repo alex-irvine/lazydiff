@@ -11,6 +11,7 @@ import (
 	"github.com/alex-irvine/lazydiff/agent"
 	"github.com/alex-irvine/lazydiff/config"
 	"github.com/alex-irvine/lazydiff/delta"
+	"github.com/alex-irvine/lazydiff/diff"
 	"github.com/alex-irvine/lazydiff/git"
 	"github.com/alex-irvine/lazydiff/pr"
 	"github.com/alex-irvine/lazydiff/prompt"
@@ -74,7 +75,9 @@ func runApp(ctx context.Context, configPath string, _ io.Reader, _, _ io.Writer)
 	if err != nil {
 		return err
 	}
-	loader := repositoryLoader{repo: repo}
+	remoteURL, _ := repo.RemoteURL(ctx, "origin")
+	ghReviewer := pr.NewGitHub(remoteURL, git.ExecRunner{})
+	loader := repositoryLoader{repo: repo, gh: ghReviewer}
 	var runner agent.Runner
 	switch cfg.Agent.Provider {
 	case "copilot":
@@ -86,7 +89,7 @@ func runApp(ctx context.Context, configPath string, _ io.Reader, _, _ io.Writer)
 	default:
 		return fmt.Errorf("unsupported agent provider %q", cfg.Agent.Provider)
 	}
-	model := ui.NewTeaModel(ui.NewModel(repo, cfg, loader, delta.Renderer{Command: "delta"}, runner, templates, repo, pr.NewOpener()))
+	model := ui.NewTeaModel(ui.NewModel(repo, cfg, loader, delta.Renderer{Command: "delta"}, runner, templates, repo, pr.NewOpener(), ghReviewer))
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	model.SetSend(program.Send)
 	_, err = program.Run()
@@ -96,7 +99,10 @@ func runApp(ctx context.Context, configPath string, _ io.Reader, _, _ io.Writer)
 	return err
 }
 
-type repositoryLoader struct{ repo git.Repository }
+type repositoryLoader struct {
+	repo git.Repository
+	gh   *pr.GitHub
+}
 
 func (l repositoryLoader) Snapshot(ctx context.Context, mode git.Mode) (git.Snapshot, error) {
 	return l.repo.Snapshot(ctx, mode)
@@ -104,4 +110,30 @@ func (l repositoryLoader) Snapshot(ctx context.Context, mode git.Mode) (git.Snap
 
 func (l repositoryLoader) SnapshotBranch(ctx context.Context, branch string) (git.Snapshot, error) {
 	return l.repo.SnapshotBranch(ctx, branch)
+}
+
+func (l repositoryLoader) SnapshotPR(ctx context.Context, number int) (git.Snapshot, error) {
+	if l.gh == nil {
+		return git.Snapshot{}, fmt.Errorf("gh reviewer not configured")
+	}
+	p, err := l.gh.PR(ctx, number)
+	if err != nil {
+		return git.Snapshot{}, err
+	}
+	raw, err := l.gh.PRDiff(ctx, number)
+	if err != nil {
+		return git.Snapshot{}, err
+	}
+	files, err := diff.Parse(raw)
+	if err != nil {
+		return git.Snapshot{}, err
+	}
+	id := fmt.Sprintf("pr-%d-%s", p.Number, p.CreatedAt)
+	return git.Snapshot{
+		ID:      id,
+		Mode:    git.Branch,
+		Base:    p.BaseRefName + "..." + p.HeadRefName,
+		RawDiff: raw,
+		Files:   files,
+	}, nil
 }
