@@ -312,3 +312,98 @@ func readUntil(t *testing.T, reader *os.File, marker string, timeout time.Durati
 		return ""
 	}
 }
+
+func TestPTYPRReviewApproveFlow(t *testing.T) {
+	fixture := newFixture(t)
+	run(t, fixture.root, "git", "remote", "add", "origin", "git@github.com:alex-irvine/lazydiff.git")
+	ghLog := filepath.Join(fixture.root, "gh.log")
+	gh := filepath.Join(filepath.Dir(fixture.binary), "gh")
+	writeExecutable(t, gh, `#!/bin/sh
+case "$1 $2" in
+"pr list") echo '[{"number":42,"title":"feat: add login","author":"alex","headRefName":"feat-login","baseRefName":"main","mergeable":"MERGEABLE","url":"https://github.com/alex-irvine/lazydiff/pull/42","createdAt":"2026-07-01T00:00:00Z"}]';;
+"pr view") echo '{"number":42,"title":"feat: add login","author":"alex","headRefName":"feat-login","baseRefName":"main","mergeable":"MERGEABLE","url":"https://github.com/alex-irvine/lazydiff/pull/42","createdAt":"2026-07-01T00:00:00Z"}';;
+"pr diff") printf 'diff --git a/login.go b/login.go\nnew file mode 100644\n--- /dev/null\n+++ b/login.go\n@@ -0,0 +1 @@\n+func login() {}\n';;
+"pr review") echo "$@" >> "$GH_LOG";;
+esac
+`)
+	defer os.Remove(gh)
+
+	cmd := exec.Command(fixture.binary, "-config", fixture.config)
+	cmd.Dir = fixture.root
+	cmd.Env = append(os.Environ(), "PATH="+filepath.Dir(fixture.delta)+":"+os.Getenv("PATH"), "GH_LOG="+ghLog)
+	terminal, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer terminal.Close()
+	if err := pty.Setsize(terminal, &pty.Winsize{Cols: 120, Rows: 40}); err != nil {
+		t.Fatal(err)
+	}
+	_ = readUntil(t, terminal, "delta-output", 3*time.Second)
+
+	// worktree → branch selector → PR selector
+	if _, err := terminal.Write([]byte("]")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if _, err := terminal.Write([]byte("]")); err != nil {
+		t.Fatal(err)
+	}
+	output := readUntil(t, terminal, "#42", 3*time.Second)
+	if !strings.Contains(output, "feat: add login") {
+		t.Fatalf("expected PR row:\n%s", output)
+	}
+
+	// select PR #42 → PR diff
+	if _, err := terminal.Write([]byte{13}); err != nil { // enter
+		t.Fatal(err)
+	}
+	output = readUntil(t, terminal, "login.go", 3*time.Second)
+	if !strings.Contains(output, "login.go") {
+		t.Fatalf("expected PR diff:\n%s", output)
+	}
+
+	// h returns to PR selector, re-enter hits the diff cache
+	if _, err := terminal.Write([]byte("h")); err != nil {
+		t.Fatal(err)
+	}
+	output = readUntil(t, terminal, "PRs", 3*time.Second)
+	if !strings.Contains(output, "#42") {
+		t.Fatalf("expected PR list after h:\n%s", output)
+	}
+	if _, err := terminal.Write([]byte{13}); err != nil {
+		t.Fatal(err)
+	}
+	output = readUntil(t, terminal, "login.go", 3*time.Second)
+
+	// ga → confirm dialog → ctrl+s approve
+	if _, err := terminal.Write([]byte("g")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := terminal.Write([]byte("a")); err != nil {
+		t.Fatal(err)
+	}
+	output = readUntil(t, terminal, "Approve PR #42", 5*time.Second)
+	if !strings.Contains(output, "ctrl+s confirm") {
+		t.Fatalf("expected confirm hint:\n%s", output)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := terminal.Write([]byte{19}); err != nil { // ctrl+s
+		t.Fatal(err)
+	}
+	time.Sleep(400 * time.Millisecond)
+	if _, err := terminal.Write([]byte("q")); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("lazydiff exit: %v", err)
+	}
+	logData, err := os.ReadFile(ghLog)
+	if err != nil {
+		t.Fatalf("read gh log: %v", err)
+	}
+	if !strings.Contains(string(logData), "pr review 42 --approve") {
+		t.Fatalf("expected approve invocation, gh log = %q", logData)
+	}
+}
