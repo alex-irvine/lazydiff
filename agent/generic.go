@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 type Generic struct {
@@ -38,15 +40,15 @@ func (g Generic) Run(ctx context.Context, request Request, emit func(Event)) err
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start agent: %w", err)
 	}
-	if _, err := io.Copy(stdin, strings.NewReader(request.Prompt)); err != nil {
-		_ = stdin.Close()
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("write agent prompt: %w", err)
-	}
-	if err := stdin.Close(); err != nil {
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("close agent stdin: %w", err)
-	}
+	stdinErr := func() error {
+		_, err := io.Copy(stdin, strings.NewReader(request.Prompt))
+		if err != nil {
+			_ = stdin.Close()
+			_ = cmd.Process.Kill()
+			return err
+		}
+		return stdin.Close()
+	}()
 
 	var wg sync.WaitGroup
 	var stdoutErr, stderrErr error
@@ -69,6 +71,15 @@ func (g Generic) Run(ctx context.Context, request Request, emit func(Event)) err
 	}
 	if stderrErr != nil {
 		return fmt.Errorf("read agent diagnostics: %w", stderrErr)
+	}
+	// EPIPE on stdin write is expected when the process exits before
+	// consuming input (e.g. a script that ignores stdin). All output
+	// was already captured above, so it's safe to ignore.
+	if stdinErr != nil && waitErr == nil && errors.Is(stdinErr, syscall.EPIPE) {
+		stdinErr = nil
+	}
+	if stdinErr != nil {
+		return fmt.Errorf("write agent prompt: %w", stdinErr)
 	}
 	if waitErr != nil {
 		return fmt.Errorf("agent exited: %w", waitErr)
