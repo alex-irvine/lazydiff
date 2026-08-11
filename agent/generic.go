@@ -75,7 +75,7 @@ func (g Generic) Run(ctx context.Context, request Request, emit func(Event)) err
 	// EPIPE on stdin write is expected when the process exits before
 	// consuming input (e.g. a script that ignores stdin). All output
 	// was already captured above, so it's safe to ignore.
-	if stdinErr != nil && waitErr == nil && errors.Is(stdinErr, syscall.EPIPE) {
+	if stdinErr != nil && errors.Is(stdinErr, syscall.EPIPE) {
 		stdinErr = nil
 	}
 	if stdinErr != nil {
