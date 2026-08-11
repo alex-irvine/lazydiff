@@ -255,7 +255,7 @@ Repository: {{repository}}
 Staged diff:
 {{staged_diff}}
 
-Write a concise commit message: a short subject line (50 characters or fewer, no trailing period), a blank line, then a body explaining what changed and why. Return only the commit message text, nothing else.`
+Write a concise commit message: a short subject line (50 characters or fewer, no trailing period), a blank line, then a body explaining what changed and why. Plain text only — no markdown formatting, no code fences, no bullet symbols, no headers. Return only the commit message text, nothing else.`
 
 const defaultPRDescriptionPrompt = `You are writing a GitHub pull request title and description in read-only mode; you do not run any commands.
 
