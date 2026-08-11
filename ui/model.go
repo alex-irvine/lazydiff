@@ -3,6 +3,8 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -209,6 +211,9 @@ type prActionDoneMsg struct {
 	Err     error
 	Warning string
 }
+
+type editorDoneMsg struct{}
+type editorErrorMsg struct{ Err error }
 
 // Renderer is the small dependency required by Model; delta.Renderer satisfies it.
 type Renderer interface {
@@ -447,6 +452,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.status = "update complete! restart lazydiff"
 		}
+	case editorDoneMsg:
+		m.status = "editor closed"
+		return m, m.refreshCmd()
+	case editorErrorMsg:
+		m.status = "editor error: " + message.Err.Error()
+		return m, nil
 	case tea.KeyMsg:
 		return m.updateKey(message)
 	}
@@ -830,6 +841,13 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		if m.treeMode == TreeModeWorktree && len(m.tree.StagingPlan()) > 0 {
 			return m, m.startCommitCmd()
 		}
+	case "e":
+		if m.focus == FocusTree && m.treeMode == TreeModeWorktree {
+			if file, _, ok := m.tree.Selected(); ok {
+				path := filepath.Join(m.repo.Root, file.Path)
+				return m, m.openEditorCmd(path)
+			}
+		}
 	case "o":
 		if m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
 			return m, m.openPRInBrowserCmd()
@@ -954,6 +972,16 @@ func (m Model) refreshCmd() tea.Cmd {
 		}
 		return snapshotMsg{Snapshot: snapshot}
 	}
+}
+
+func (m Model) openEditorCmd(path string) tea.Cmd {
+	cmd := exec.Command("nvim", path)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return editorErrorMsg{Err: err}
+		}
+		return editorDoneMsg{}
+	})
 }
 
 func (m Model) loadBranchesCmd() tea.Cmd {

@@ -768,6 +768,7 @@ func TestHelpTextReflectsNewKeybindings(t *testing.T) {
 		"Toggle check for staging",
 		"Check / uncheck all",
 		"Stage checked items and commit",
+		"Open selected file in editor",
 		"Push and open pull request",
 		"Cancel running analysis",
 	} {

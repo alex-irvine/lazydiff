@@ -491,6 +491,7 @@ func (m Model) helpText() string {
 		key("space", "Toggle check for staging (working tree mode)"),
 		key("ctrl+a", "Check / uncheck all"),
 		key("c", "Stage checked items and commit"),
+		key("e", "Open selected file in editor"),
 		key("o", "Push and open pull request"),
 		"",
 		section("PR Review"),
