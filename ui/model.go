@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -214,6 +215,7 @@ type prActionDoneMsg struct {
 
 type editorDoneMsg struct{}
 type editorErrorMsg struct{ Err error }
+type branchFileReadyMsg struct{ Path string }
 
 // Renderer is the small dependency required by Model; delta.Renderer satisfies it.
 type Renderer interface {
@@ -452,6 +454,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.status = "update complete! restart lazydiff"
 		}
+	case branchFileReadyMsg:
+		return m, m.openTempEditorCmd(message.Path)
 	case editorDoneMsg:
 		m.status = "editor closed"
 		return m, m.refreshCmd()
@@ -848,6 +852,11 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 				return m, m.openEditorCmd(path)
 			}
 		}
+		if m.focus == FocusTree && m.treeMode == TreeModeBranchDiff && m.branchSelector != nil && m.branchSelector.selectedBranch != "" {
+			if file, _, ok := m.tree.Selected(); ok {
+				return m, m.openBranchFileCmd(m.branchSelector.selectedBranch, file.Path)
+			}
+		}
 	case "o":
 		if m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
 			return m, m.openPRInBrowserCmd()
@@ -977,6 +986,40 @@ func (m Model) refreshCmd() tea.Cmd {
 func (m Model) openEditorCmd(path string) tea.Cmd {
 	cmd := exec.Command("nvim", path)
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return editorErrorMsg{Err: err}
+		}
+		return editorDoneMsg{}
+	})
+}
+
+func (m Model) openBranchFileCmd(branch, filePath string) tea.Cmd {
+	repoRoot := m.repo.Root
+	return func() tea.Msg {
+		tmpFile, err := os.CreateTemp("", "lazydiff-*.go")
+		if err != nil {
+			return editorErrorMsg{Err: fmt.Errorf("create temp file: %w", err)}
+		}
+		tmpPath := tmpFile.Name()
+		tmpFile.Close()
+
+		gitShow := exec.Command("git", "-C", repoRoot, "show", branch+":"+filePath)
+		out, err := gitShow.Output()
+		if err != nil {
+			os.Remove(tmpPath)
+			return editorErrorMsg{Err: fmt.Errorf("git show %s:%s: %w", branch, filePath, err)}
+		}
+		if err := os.WriteFile(tmpPath, out, 0o644); err != nil {
+			os.Remove(tmpPath)
+			return editorErrorMsg{Err: fmt.Errorf("write temp file: %w", err)}
+		}
+		return branchFileReadyMsg{Path: tmpPath}
+	}
+}
+
+func (m Model) openTempEditorCmd(path string) tea.Cmd {
+	return tea.ExecProcess(exec.Command("nvim", path), func(err error) tea.Msg {
+		os.Remove(path)
 		if err != nil {
 			return editorErrorMsg{Err: err}
 		}
