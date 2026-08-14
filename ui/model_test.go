@@ -1283,3 +1283,55 @@ func TestSearchResetsOnEsc(t *testing.T) {
 		t.Fatal("search should be cleared on esc")
 	}
 }
+
+func TestWorktreeSelectorCreatedOnBranchesLoaded(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	wt := map[string]string{"feature": "/wt/feature", "main": "/repo"}
+	msg := branchesLoadedMsg{
+		Branches:  []string{"main", "feature"},
+		Current:   "main",
+		Default:   "main",
+		Worktrees: wt,
+	}
+	model, _ = model.Update(msg)
+	if model.worktreeSelector == nil {
+		t.Fatal("expected worktreeSelector to be created")
+	}
+	rows := model.worktreeSelector.Rows()
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 worktree entries, got %d", len(rows))
+	}
+}
+
+func TestWorktreeSelectorEnterLoadsDiff(t *testing.T) {
+	loader := &fakeLoader{
+		snapshots: []git.Snapshot{makeSnapshot("wt-diff")},
+	}
+	model := newTestModel(loader, &fakeRunner{})
+	wt := map[string]string{"feature": "/wt/feature"}
+	msg := branchesLoadedMsg{
+		Branches:  []string{"main"},
+		Current:   "main",
+		Default:   "main",
+		Worktrees: wt,
+	}
+	model, _ = model.Update(msg)
+	model.treeMode = TreeModeWorktree
+	model.worktreeSelector.Move(1) // select "feature"
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.treeMode != TreeModeWorktreeDiff {
+		t.Fatalf("treeMode = %d, want WorktreeDiff", model.treeMode)
+	}
+	if cmd == nil {
+		t.Fatal("expected a command to load snapshot")
+	}
+}
+
+func TestHKeyFromWorktreeDiffGoesToSelector(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.treeMode = TreeModeWorktreeDiff
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	if model.treeMode != TreeModeWorktree {
+		t.Fatalf("treeMode = %d, want Worktree", model.treeMode)
+	}
+}

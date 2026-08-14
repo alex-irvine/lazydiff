@@ -738,6 +738,15 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 				return m, m.openSelectedPRCmd()
 			}
 		}
+		if m.focus == FocusTree && m.treeMode == TreeModeWorktree && m.worktreeSelector != nil {
+			name := m.worktreeSelector.Selected()
+			if name != "" {
+				m.worktreeSelector.Select(name)
+				m.selectedWorktree = m.worktreeSelector.SelectedPath()
+				m.treeMode = TreeModeWorktreeDiff
+				return m, m.loadWorktreeSnapshotCmd(m.selectedWorktree)
+			}
+		}
 	case " ":
 		if m.focus == FocusTree && m.treeMode == TreeModeWorktree {
 			m.tree.ToggleCheck()

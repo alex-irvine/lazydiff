@@ -94,7 +94,7 @@ func TestRenderBranchSelectorShowsWorktreeSuffix(t *testing.T) {
 	wt := map[string]string{"feature": "/wt/feature"}
 	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "main", "main", wt)
 	out := model.renderTree(model.layout.Files)
-	if !strings.Contains(out, "feature (wt)") {
+	if !strings.Contains(out, "(wt) feature") {
 		t.Fatalf("expected (wt) suffix for worktree branch:\n%s", out)
 	}
 }
@@ -315,5 +315,21 @@ func TestRenderConfirmDialog(t *testing.T) {
 	out := model.renderConfirmDialog()
 	if !strings.Contains(out, "Approve PR") || !strings.Contains(out, "ctrl+s") {
 		t.Fatalf("confirm dialog out: %s", out)
+	}
+}
+
+func TestRenderTreeShowsWorktreeSelectorWhenInWorktreeMode(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.treeMode = TreeModeWorktree
+	entries := []WorktreeEntry{
+		{Name: "repo", Path: "/repo"},
+		{Name: "feature", Path: "/wt/feature"},
+	}
+	model.worktreeSelector = NewWorktreeSelector(entries, "repo")
+	out := model.renderTree(model.layout.Files)
+	if !strings.Contains(out, "feature") {
+		t.Fatalf("expected worktree list in tree pane:\n%s", out)
 	}
 }
