@@ -693,6 +693,8 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		if m.focus == FocusTree && m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
 			m.branchSelector.Move(-1)
+		} else if m.focus == FocusTree && m.treeMode == TreeModeWorktree && m.worktreeSelector != nil {
+			m.worktreeSelector.Move(-1)
 		} else if m.focus == FocusTree {
 			m.tree.Move(-1)
 			m.diffScroll = 0
@@ -711,6 +713,8 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		if m.focus == FocusTree && m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
 			m.branchSelector.Move(1)
+		} else if m.focus == FocusTree && m.treeMode == TreeModeWorktree && m.worktreeSelector != nil {
+			m.worktreeSelector.Move(1)
 		} else if m.focus == FocusTree {
 			m.tree.Move(1)
 			m.diffScroll = 0
