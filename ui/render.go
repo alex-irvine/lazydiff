@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -140,6 +141,9 @@ func (m Model) renderTree(r Rect) string {
 	if m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
 		return m.renderBranchSelector(r)
 	}
+	if m.treeMode == TreeModeWorktree && m.worktreeSelector != nil {
+		return m.renderWorktreeSelector(r)
+	}
 	title := m.renderTabBar()
 	titleRendered := delta.Truncate(title, max(1, r.W-2))
 	lines := []string{titleRendered}
@@ -236,12 +240,39 @@ func (m Model) renderBranchSelector(r Rect) string {
 		}
 		display := branch
 		if _, ok := m.branchSelector.WorktreePath(branch); ok {
-			display = branch + " (wt)"
+			display = "(wt) " + branch
 			if i != m.branchSelector.Cursor() && branch != m.branchSelector.currentBranch {
 				style = lipgloss.Color("114")
 			}
 		}
 		line := delta.Truncate(prefix+display, maxW)
+		lines = append(lines, lipgloss.NewStyle().Foreground(style).Render(line))
+	}
+	return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
+}
+
+func (m Model) renderWorktreeSelector(r Rect) string {
+	title := delta.Truncate(m.renderTabBar(), max(1, r.W-2))
+	lines := []string{title}
+	rows := m.worktreeSelector.Rows()
+	if len(rows) == 0 {
+		empty := delta.Truncate(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("(no worktrees)"), max(1, r.W-2))
+		lines = append(lines, empty)
+		return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
+	}
+	maxW := max(1, r.W-2)
+	for i, entry := range rows {
+		prefix := "  "
+		if i == m.worktreeSelector.Cursor() {
+			prefix = "▶ "
+		}
+		style := lipgloss.Color("245")
+		if i == m.worktreeSelector.Cursor() {
+			style = lipgloss.Color("51")
+		} else if entry.Name == m.worktreeSelector.current {
+			style = lipgloss.Color("228")
+		}
+		line := delta.Truncate(prefix+entry.Name, maxW)
 		lines = append(lines, lipgloss.NewStyle().Foreground(style).Render(line))
 	}
 	return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
@@ -306,7 +337,15 @@ func (m Model) renderTabBar() string {
 	active := lipgloss.NewStyle().Foreground(green).Bold(true).Render
 	inactive := lipgloss.NewStyle().Foreground(dim).Render
 	switch m.treeMode {
-	case TreeModeWorktree, TreeModeStaged:
+	case TreeModeWorktree:
+		return active("[1] Worktree") + "  " + inactive("Branch") + "  " + inactive("PRs")
+	case TreeModeWorktreeDiff:
+		name := "Worktree"
+		if m.selectedWorktree != "" {
+			name = filepath.Base(m.selectedWorktree)
+		}
+		return active(name) + "  " + inactive("Branch") + "  " + inactive("PRs")
+	case TreeModeStaged:
 		return active("[1] Worktree") + "  " + inactive("Branch") + "  " + inactive("PRs")
 	case TreeModeBranchDiff:
 		name := "Branch"
