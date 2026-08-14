@@ -25,6 +25,7 @@ type TreeMode int
 
 const (
 	TreeModeWorktree TreeMode = iota
+	TreeModeWorktreeDiff
 	TreeModeStaged
 	TreeModeBranchSelector
 	TreeModeBranchDiff
@@ -110,8 +111,10 @@ type Model struct {
 	haveSnap       bool
 	mode           git.Mode
 	treeMode       TreeMode
-	branchSelector *BranchSelector
-	prSelector     *PRSelector
+	branchSelector    *BranchSelector
+	worktreeSelector  *WorktreeSelector
+	selectedWorktree  string // path of the selected worktree
+	prSelector        *PRSelector
 	prReviewer     PRReviewer
 	pendingPRKey   rune
 	confirm        *ConfirmDialog
@@ -285,6 +288,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tickCmd()
 	case branchesLoadedMsg:
 		m.branchSelector = NewBranchSelector(message.Branches, message.Current, message.Default, message.Worktrees)
+		var wtEntries []WorktreeEntry
+		for _, path := range message.Worktrees {
+			name := filepath.Base(path)
+			wtEntries = append(wtEntries, WorktreeEntry{Name: name, Path: path})
+		}
+		if len(wtEntries) == 0 {
+			wtEntries = append(wtEntries, WorktreeEntry{Name: filepath.Base(m.repo.Root), Path: m.repo.Root})
+		}
+		m.worktreeSelector = NewWorktreeSelector(wtEntries, filepath.Base(m.repo.Root))
 		return m, nil
 	case branchesErrorMsg:
 		m.status = "branch list: " + message.Err.Error()
@@ -747,6 +759,10 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			m.treeMode = TreeModeBranchSelector
 			return m, nil
 		}
+		if m.focus == FocusTree && m.treeMode == TreeModeWorktreeDiff {
+			m.treeMode = TreeModeWorktree
+			return m, nil
+		}
 		if m.focus == FocusTree {
 			m.tree.CollapseOrParent()
 			m.diffScroll = 0
@@ -766,6 +782,15 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 				m.branchSelector.Select(branch)
 				m.treeMode = TreeModeBranchDiff
 				return m, m.refreshCmd()
+			}
+		}
+		if m.focus == FocusTree && m.treeMode == TreeModeWorktree && m.worktreeSelector != nil {
+			name := m.worktreeSelector.Selected()
+			if name != "" {
+				m.worktreeSelector.Select(name)
+				m.selectedWorktree = m.worktreeSelector.SelectedPath()
+				m.treeMode = TreeModeWorktreeDiff
+				return m, m.loadWorktreeSnapshotCmd(m.selectedWorktree)
 			}
 		}
 		if m.focus == FocusTree {
@@ -802,7 +827,7 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		} else if m.focus == FocusTree {
 			switch m.treeMode {
-			case TreeModeWorktree:
+			case TreeModeWorktree, TreeModeWorktreeDiff, TreeModeStaged:
 				m.treeMode = TreeModeBranchSelector
 				if m.branchSelector == nil {
 					return m, m.loadBranchesCmd()
@@ -814,6 +839,9 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 				}
 			default:
 				m.treeMode = TreeModeWorktree
+				if m.worktreeSelector == nil {
+					return m, m.loadBranchesCmd()
+				}
 			}
 		}
 	case "1":
@@ -850,6 +878,12 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		if m.focus == FocusTree && m.treeMode == TreeModeWorktree {
 			if file, _, ok := m.tree.Selected(); ok {
 				path := filepath.Join(m.repo.Root, file.Path)
+				return m, m.openEditorCmd(path)
+			}
+		}
+		if m.focus == FocusTree && m.treeMode == TreeModeWorktreeDiff && m.selectedWorktree != "" {
+			if file, _, ok := m.tree.Selected(); ok {
+				path := filepath.Join(m.selectedWorktree, file.Path)
 				return m, m.openEditorCmd(path)
 			}
 		}
@@ -978,6 +1012,17 @@ func (m Model) refreshCmd() tea.Cmd {
 			return snapshotErrorMsg{Err: fmt.Errorf("snapshot loader unavailable")}
 		}
 		snapshot, err := loader.Snapshot(context.Background(), mode)
+		if err != nil {
+			return snapshotErrorMsg{Err: err}
+		}
+		return snapshotMsg{Snapshot: snapshot}
+	}
+}
+
+func (m Model) loadWorktreeSnapshotCmd(path string) tea.Cmd {
+	repo := m.repo
+	return func() tea.Msg {
+		snapshot, err := repo.WorktreeSnapshot(context.Background(), path)
 		if err != nil {
 			return snapshotErrorMsg{Err: err}
 		}
