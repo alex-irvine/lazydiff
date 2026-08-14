@@ -87,6 +87,9 @@ func (r Repository) SnapshotBranch(ctx context.Context, branch string) (Snapshot
 }
 
 func (r Repository) WorktreeSnapshot(ctx context.Context, worktreePath string) (Snapshot, error) {
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return Snapshot{}, fmt.Errorf("worktree directory not found: %s", worktreePath)
+	}
 	raw, err := r.runner.Run(ctx, "git", "-C", worktreePath, "diff", "--no-color", "--binary", "HEAD")
 	if err != nil && len(raw) == 0 {
 		return Snapshot{}, fmt.Errorf("worktree diff at %s: %w", worktreePath, err)

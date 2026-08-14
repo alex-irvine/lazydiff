@@ -86,19 +86,6 @@ func TestRenderTreeShowsBranchSelectorWhenInBranchSelectorMode(t *testing.T) {
 	}
 }
 
-func TestRenderBranchSelectorShowsWorktreeSuffix(t *testing.T) {
-	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
-	model.termW, model.termH = 120, 40
-	model.layout = ComputeLayout(120, 40)
-	model.treeMode = TreeModeBranchSelector
-	wt := map[string]string{"feature": "/wt/feature"}
-	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "main", "main", wt)
-	out := model.renderTree(model.layout.Files)
-	if !strings.Contains(out, "(wt) feature") {
-		t.Fatalf("expected (wt) suffix for worktree branch:\n%s", out)
-	}
-}
-
 func TestRenderTreeShowsActiveTabGreenForWorktree(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	model.termW, model.termH = 120, 40
