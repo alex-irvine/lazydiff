@@ -86,6 +86,20 @@ func (r Repository) SnapshotBranch(ctx context.Context, branch string) (Snapshot
 	return Snapshot{ID: fmt.Sprintf("%x", hash[:]), Mode: Branch, Base: ref, RawDiff: rawText, Files: files}, nil
 }
 
+func (r Repository) WorktreeSnapshot(ctx context.Context, worktreePath string) (Snapshot, error) {
+	raw, err := r.runner.Run(ctx, "git", "-C", worktreePath, "diff", "--no-color", "--binary", "HEAD")
+	if err != nil && len(raw) == 0 {
+		return Snapshot{}, fmt.Errorf("worktree diff at %s: %w", worktreePath, err)
+	}
+	rawText := string(raw)
+	files, parseErr := diff.Parse(rawText)
+	if parseErr != nil {
+		return Snapshot{}, fmt.Errorf("parse worktree diff at %s: %w", worktreePath, parseErr)
+	}
+	hash := sha256.Sum256([]byte(fmt.Sprintf("worktree\x00%s\x00%s", worktreePath, rawText)))
+	return Snapshot{ID: fmt.Sprintf("%x", hash[:]), Mode: WorkingTree, Base: "HEAD", RawDiff: rawText, Files: files}, nil
+}
+
 func (r Repository) untrackedDiffs(ctx context.Context) (string, error) {
 	output, err := r.run(ctx, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {

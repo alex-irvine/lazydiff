@@ -311,6 +311,29 @@ func TestWorktreesViaFakeRunner(t *testing.T) {
 	}
 }
 
+func TestWorktreeSnapshotRunsDiffFromWorktreeDir(t *testing.T) {
+	dir := testRepo(t)
+	runGit(t, dir, "checkout", "-b", "wt-branch")
+	runGit(t, dir, "checkout", "main")
+	wtDir := filepath.Join(t.TempDir(), "wt")
+	runGit(t, dir, "worktree", "add", wtDir, "wt-branch")
+	if err := os.WriteFile(filepath.Join(wtDir, "wt.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtDir, "add", "wt.txt")
+	r, err := Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := r.WorktreeSnapshot(context.Background(), wtDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(snapshot.RawDiff, "wt.txt") {
+		t.Fatalf("expected wt.txt in diff:\n%s", snapshot.RawDiff)
+	}
+}
+
 func TestWorktreesEmptyOutput(t *testing.T) {
 	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{
 		"-C /repo worktree list --porcelain": []byte("worktree /repo\nHEAD abc123\nbranch refs/heads/main\n"),
