@@ -267,3 +267,59 @@ func TestSnapshotBranchViaFakeRunner(t *testing.T) {
 		t.Fatal("expected parsed files")
 	}
 }
+
+func TestWorktreesListsBranchesWithPaths(t *testing.T) {
+	dir := testRepo(t)
+	runGit(t, dir, "checkout", "-b", "wt-branch")
+	runGit(t, dir, "checkout", "main")
+	wtDir := filepath.Join(t.TempDir(), "wt")
+	runGit(t, dir, "worktree", "add", wtDir, "wt-branch")
+	r, err := Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktrees, err := r.Worktrees(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, ok := worktrees["wt-branch"]
+	if !ok {
+		t.Fatalf("expected worktree for wt-branch, got %v", worktrees)
+	}
+	if path != wtDir {
+		t.Fatalf("worktree path = %q, expected %s", path, wtDir)
+	}
+}
+
+func TestWorktreesViaFakeRunner(t *testing.T) {
+	output := "worktree /wt/feature\nHEAD abc123\nbranch refs/heads/feature\n\nworktree /repo\nHEAD def456\nbranch refs/heads/main\n"
+	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{
+		"-C /repo worktree list --porcelain": []byte(output),
+	}}}
+	worktrees, err := r.Worktrees(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(worktrees) != 2 {
+		t.Fatalf("expected 2 worktrees, got %v", worktrees)
+	}
+	if worktrees["feature"] != "/wt/feature" {
+		t.Fatalf("feature path = %q", worktrees["feature"])
+	}
+	if worktrees["main"] != "/repo" {
+		t.Fatalf("main path = %q", worktrees["main"])
+	}
+}
+
+func TestWorktreesEmptyOutput(t *testing.T) {
+	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{
+		"-C /repo worktree list --porcelain": []byte("worktree /repo\nHEAD abc123\nbranch refs/heads/main\n"),
+	}}}
+	worktrees, err := r.Worktrees(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(worktrees) != 1 {
+		t.Fatalf("expected 1 worktree, got %v", worktrees)
+	}
+}

@@ -1182,7 +1182,7 @@ func TestBranchSelectorEnterLoadsBranchDiff(t *testing.T) {
 	}
 	model := newTestModel(loader, &fakeRunner{})
 	model.treeMode = TreeModeBranchSelector
-	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "main", "main")
+	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "main", "main", nil)
 	model.branchSelector.Move(1)
 
 	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})

@@ -8,9 +8,10 @@ type BranchSelector struct {
 	defaultBranch  string
 	cursor         int
 	selectedBranch string
+	worktrees      map[string]string
 }
 
-func NewBranchSelector(branches []string, currentBranch, defaultBranch string) *BranchSelector {
+func NewBranchSelector(branches []string, currentBranch, defaultBranch string, worktrees map[string]string) *BranchSelector {
 	sorted := make([]string, 0, len(branches))
 	for _, b := range branches {
 		if b != defaultBranch {
@@ -24,6 +25,7 @@ func NewBranchSelector(branches []string, currentBranch, defaultBranch string) *
 		currentBranch: currentBranch,
 		defaultBranch: defaultBranch,
 		cursor:        0,
+		worktrees:     worktrees,
 	}
 }
 
@@ -53,3 +55,11 @@ func (b *BranchSelector) Rows() []string {
 }
 
 func (b *BranchSelector) Cursor() int { return b.cursor }
+
+func (b *BranchSelector) WorktreePath(branch string) (string, bool) {
+	if b.worktrees == nil {
+		return "", false
+	}
+	path, ok := b.worktrees[branch]
+	return path, ok
+}

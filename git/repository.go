@@ -115,6 +115,29 @@ func (r Repository) RemoteURL(ctx context.Context, remote string) (string, error
 	return url, nil
 }
 
+func (r Repository) Worktrees(ctx context.Context) (map[string]string, error) {
+	output, err := r.run(ctx, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("list worktrees: %w", err)
+	}
+	result := make(map[string]string)
+	var currentPath string
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "worktree ") {
+			currentPath = strings.TrimPrefix(line, "worktree ")
+		} else if strings.HasPrefix(line, "branch ") {
+			ref := strings.TrimPrefix(line, "branch ")
+			// ref is like "refs/heads/feature" — extract short name
+			branch := strings.TrimPrefix(ref, "refs/heads/")
+			if branch != "" && currentPath != "" {
+				result[branch] = currentPath
+			}
+		}
+	}
+	return result, nil
+}
+
 func runOutput(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	var stderr bytes.Buffer

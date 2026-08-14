@@ -234,7 +234,14 @@ func (m Model) renderBranchSelector(r Rect) string {
 		} else if branch == m.branchSelector.currentBranch {
 			style = lipgloss.Color("228")
 		}
-		line := delta.Truncate(prefix+branch, maxW)
+		display := branch
+		if _, ok := m.branchSelector.WorktreePath(branch); ok {
+			display = branch + " (wt)"
+			if i != m.branchSelector.Cursor() && branch != m.branchSelector.currentBranch {
+				style = lipgloss.Color("114")
+			}
+		}
+		line := delta.Truncate(prefix+display, maxW)
 		lines = append(lines, lipgloss.NewStyle().Foreground(style).Render(line))
 	}
 	return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)

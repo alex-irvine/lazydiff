@@ -33,9 +33,10 @@ const (
 )
 
 type branchesLoadedMsg struct {
-	Branches []string
-	Current  string
-	Default  string
+	Branches  []string
+	Current   string
+	Default   string
+	Worktrees map[string]string
 }
 
 type branchesErrorMsg struct{ Err error }
@@ -283,7 +284,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.status = "git error: " + message.Err.Error()
 		return m, tickCmd()
 	case branchesLoadedMsg:
-		m.branchSelector = NewBranchSelector(message.Branches, message.Current, message.Default)
+		m.branchSelector = NewBranchSelector(message.Branches, message.Current, message.Default, message.Worktrees)
 		return m, nil
 	case branchesErrorMsg:
 		m.status = "branch list: " + message.Err.Error()
@@ -854,7 +855,8 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		if m.focus == FocusTree && m.treeMode == TreeModeBranchDiff && m.branchSelector != nil && m.branchSelector.selectedBranch != "" {
 			if file, _, ok := m.tree.Selected(); ok {
-				return m, m.openBranchFileCmd(m.branchSelector.selectedBranch, file.Path)
+				wtPath, _ := m.branchSelector.WorktreePath(m.branchSelector.selectedBranch)
+				return m, m.openBranchFileCmd(m.branchSelector.selectedBranch, file.Path, wtPath)
 			}
 		}
 	case "o":
@@ -993,7 +995,17 @@ func (m Model) openEditorCmd(path string) tea.Cmd {
 	})
 }
 
-func (m Model) openBranchFileCmd(branch, filePath string) tea.Cmd {
+func (m Model) openBranchFileCmd(branch, filePath, worktreePath string) tea.Cmd {
+	if worktreePath != "" {
+		path := filepath.Join(worktreePath, filePath)
+		cmd := exec.Command("nvim", path)
+		return tea.ExecProcess(cmd, func(err error) tea.Msg {
+			if err != nil {
+				return editorErrorMsg{Err: err}
+			}
+			return editorDoneMsg{}
+		})
+	}
 	repoRoot := m.repo.Root
 	return func() tea.Msg {
 		tmpFile, err := os.CreateTemp("", "lazydiff-*.go")
@@ -1042,7 +1054,8 @@ func (m Model) loadBranchesCmd() tea.Cmd {
 		if err != nil {
 			return branchesErrorMsg{Err: err}
 		}
-		return branchesLoadedMsg{Branches: branches, Current: current, Default: def}
+		worktrees, _ := repo.Worktrees(context.Background())
+		return branchesLoadedMsg{Branches: branches, Current: current, Default: def, Worktrees: worktrees}
 	}
 }
 

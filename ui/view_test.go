@@ -79,10 +79,23 @@ func TestRenderTreeShowsBranchSelectorWhenInBranchSelectorMode(t *testing.T) {
 	model.termW, model.termH = 120, 40
 	model.layout = ComputeLayout(120, 40)
 	model.treeMode = TreeModeBranchSelector
-	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "feature", "main")
+	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "feature", "main", nil)
 	out := model.renderTree(model.layout.Files)
 	if !strings.Contains(out, "feature") {
 		t.Fatalf("expected branch list in tree pane:\n%s", out)
+	}
+}
+
+func TestRenderBranchSelectorShowsWorktreeSuffix(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.treeMode = TreeModeBranchSelector
+	wt := map[string]string{"feature": "/wt/feature"}
+	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "main", "main", wt)
+	out := model.renderTree(model.layout.Files)
+	if !strings.Contains(out, "feature (wt)") {
+		t.Fatalf("expected (wt) suffix for worktree branch:\n%s", out)
 	}
 }
 
@@ -105,7 +118,7 @@ func TestRenderTreeShowsBranchNameInTabWhenInBranchDiff(t *testing.T) {
 	model.termW, model.termH = 120, 40
 	model.layout = ComputeLayout(120, 40)
 	model.treeMode = TreeModeBranchDiff
-	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "feature", "main")
+	model.branchSelector = NewBranchSelector([]string{"main", "feature"}, "feature", "main", nil)
 	model.branchSelector.Select("feature")
 	model.snapshot = makeSnapshot("one")
 	model.haveSnap = true
