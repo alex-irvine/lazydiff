@@ -1044,21 +1044,22 @@ func TestCloseConfirmSurfacesDeleteBranchFailureAsWarningNotSilent(t *testing.T)
 	}
 }
 
-func TestHKeyFromPRSelectorGoesToBranchSelector(t *testing.T) {
+func TestHKeyCollapsesTreeInPRSelector(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	model.treeMode = TreeModePRSelector
 	model.prSelector = NewPRSelector(makeTestPRs())
+	originalMode := model.treeMode
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	if model.treeMode != TreeModeBranchSelector {
-		t.Fatalf("treeMode = %d, want BranchSelector", model.treeMode)
+	if model.treeMode != originalMode {
+		t.Fatalf("h should not change treeMode from %d to %d", originalMode, model.treeMode)
 	}
 }
 
-func TestLKeyInPRSelectorOpensSelectedPR(t *testing.T) {
+func TestEnterInPRSelectorOpensSelectedPR(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	model.treeMode = TreeModePRSelector
 	model.prSelector = NewPRSelector(makeTestPRs())
-	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected openSelectedPRCmd")
 	}
@@ -1327,10 +1328,10 @@ func TestWorktreeSelectorEnterLoadsDiff(t *testing.T) {
 	}
 }
 
-func TestHKeyFromWorktreeDiffGoesToSelector(t *testing.T) {
+func TestEscKeyFromWorktreeDiffGoesToSelector(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	model.treeMode = TreeModeWorktreeDiff
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if model.treeMode != TreeModeWorktree {
 		t.Fatalf("treeMode = %d, want Worktree", model.treeMode)
 	}

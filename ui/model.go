@@ -760,52 +760,12 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			m.tree.ToggleCheckAll()
 		}
 	case "h":
-		if m.focus == FocusTree && m.treeMode == TreeModePRDiff {
-			m.treeMode = TreeModePRSelector
-			return m, nil
-		}
-		if m.focus == FocusTree && m.treeMode == TreeModePRSelector {
-			m.treeMode = TreeModeBranchSelector
-			return m, nil
-		}
-		if m.focus == FocusTree && m.treeMode == TreeModeBranchDiff {
-			m.treeMode = TreeModeBranchSelector
-			return m, nil
-		}
-		if m.focus == FocusTree && m.treeMode == TreeModeWorktreeDiff {
-			m.treeMode = TreeModeWorktree
-			return m, nil
-		}
 		if m.focus == FocusTree {
 			m.tree.CollapseOrParent()
 			m.diffScroll = 0
 			return m, m.renderSelectedCmd()
 		}
 	case "l":
-		if m.focus == FocusTree && m.treeMode == TreeModePRSelector && m.prSelector != nil {
-			p := m.prSelector.Selected()
-			if p != nil {
-				m.prSelector.Select(p.Number)
-				return m, m.openSelectedPRCmd()
-			}
-		}
-		if m.focus == FocusTree && m.treeMode == TreeModeBranchSelector && m.branchSelector != nil {
-			branch := m.branchSelector.Selected()
-			if branch != "" {
-				m.branchSelector.Select(branch)
-				m.treeMode = TreeModeBranchDiff
-				return m, m.refreshCmd()
-			}
-		}
-		if m.focus == FocusTree && m.treeMode == TreeModeWorktree && m.worktreeSelector != nil {
-			name := m.worktreeSelector.Selected()
-			if name != "" {
-				m.worktreeSelector.Select(name)
-				m.selectedWorktree = m.worktreeSelector.SelectedPath()
-				m.treeMode = TreeModeWorktreeDiff
-				return m, m.loadWorktreeSnapshotCmd(m.selectedWorktree)
-			}
-		}
 		if m.focus == FocusTree {
 			m.tree.ExpandOrDescend()
 			m.diffScroll = 0
