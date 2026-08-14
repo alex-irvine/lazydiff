@@ -321,6 +321,7 @@ func TestWorktreeSnapshotRunsDiffFromWorktreeDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, wtDir, "add", "wt.txt")
+	runGit(t, wtDir, "commit", "-m", "add wt.txt")
 	r, err := Open(context.Background(), dir)
 	if err != nil {
 		t.Fatal(err)

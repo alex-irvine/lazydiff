@@ -985,6 +985,14 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case "esc":
 		if m.showHelp {
 			m.showHelp = false
+		} else if m.focus == FocusTree && m.treeMode == TreeModeWorktreeDiff {
+			m.treeMode = TreeModeWorktree
+		} else if m.focus == FocusTree && m.treeMode == TreeModeBranchDiff {
+			m.treeMode = TreeModeBranchSelector
+		} else if m.focus == FocusTree && m.treeMode == TreeModeBranchSelector {
+			m.treeMode = TreeModeWorktree
+		} else if m.focus == FocusTree && m.treeMode == TreeModeWorktree {
+			m.treeMode = TreeModeWorktree
 		}
 	case "q", "ctrl+c":
 		m.cancelActive()
@@ -1013,6 +1021,17 @@ func (m Model) refreshCmd() tea.Cmd {
 		branch := m.branchSelector.selectedBranch
 		return func() tea.Msg {
 			snapshot, err := loader.SnapshotBranch(context.Background(), branch)
+			if err != nil {
+				return snapshotErrorMsg{Err: err}
+			}
+			return snapshotMsg{Snapshot: snapshot}
+		}
+	}
+	if m.treeMode == TreeModeWorktreeDiff && m.selectedWorktree != "" {
+		repo := m.repo
+		path := m.selectedWorktree
+		return func() tea.Msg {
+			snapshot, err := repo.WorktreeSnapshot(context.Background(), path)
 			if err != nil {
 				return snapshotErrorMsg{Err: err}
 			}

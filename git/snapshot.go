@@ -90,7 +90,14 @@ func (r Repository) WorktreeSnapshot(ctx context.Context, worktreePath string) (
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		return Snapshot{}, fmt.Errorf("worktree directory not found: %s", worktreePath)
 	}
-	raw, err := r.runner.Run(ctx, "git", "-C", worktreePath, "diff", "--no-color", "--binary", "HEAD")
+	defaultBranch, err := r.DefaultBranch(ctx)
+	if err != nil {
+		defaultBranch = "main"
+	}
+	raw, err := r.runner.Run(ctx, "git", "-C", worktreePath, "diff", "--no-color", "--binary", "origin/"+defaultBranch)
+	if err != nil || len(raw) == 0 {
+		raw, err = r.runner.Run(ctx, "git", "-C", worktreePath, "diff", "--no-color", "--binary", defaultBranch)
+	}
 	if err != nil && len(raw) == 0 {
 		return Snapshot{}, fmt.Errorf("worktree diff at %s: %w", worktreePath, err)
 	}
@@ -100,7 +107,7 @@ func (r Repository) WorktreeSnapshot(ctx context.Context, worktreePath string) (
 		return Snapshot{}, fmt.Errorf("parse worktree diff at %s: %w", worktreePath, parseErr)
 	}
 	hash := sha256.Sum256([]byte(fmt.Sprintf("worktree\x00%s\x00%s", worktreePath, rawText)))
-	return Snapshot{ID: fmt.Sprintf("%x", hash[:]), Mode: WorkingTree, Base: "HEAD", RawDiff: rawText, Files: files}, nil
+	return Snapshot{ID: fmt.Sprintf("%x", hash[:]), Mode: WorkingTree, Base: "origin/" + defaultBranch, RawDiff: rawText, Files: files}, nil
 }
 
 func (r Repository) untrackedDiffs(ctx context.Context) (string, error) {
