@@ -257,7 +257,7 @@ func (t *TeaModel) View() string { return t.model.View() }
 func (m *Model) SetSend(send func(tea.Msg)) { m.send = send }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), checkUpdateCmd(true))
+	return tea.Batch(m.refreshCmd(), m.loadBranchesCmd(), checkUpdateCmd(true))
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
