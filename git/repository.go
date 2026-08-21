@@ -83,7 +83,7 @@ func (r Repository) DefaultBranch(ctx context.Context) (string, error) {
 			return branch, nil
 		}
 	}
-	for _, candidate := range []string{"origin/main", "main", "master"} {
+	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
 		if _, err := r.run(ctx, "rev-parse", "--verify", candidate); err == nil {
 			return candidate, nil
 		}

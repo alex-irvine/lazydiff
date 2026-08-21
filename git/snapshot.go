@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -94,24 +95,57 @@ func (r Repository) WorktreeSnapshot(ctx context.Context, worktreePath string) (
 	if err != nil {
 		defaultBranch = "main"
 	}
-	raw, err := r.runner.Run(ctx, "git", "-C", worktreePath, "diff", "--no-color", "--binary", "origin/"+defaultBranch)
-	if err != nil || len(raw) == 0 {
-		raw, err = r.runner.Run(ctx, "git", "-C", worktreePath, "diff", "--no-color", "--binary", defaultBranch)
+
+	if r.runner == nil {
+		r.runner = ExecRunner{}
+	}
+
+	var raw []byte
+	var base string
+
+	// Find merge-base between defaultBranch and HEAD in worktreePath to only include
+	// changes on this branch/worktree, without reverse diffs from commits on defaultBranch.
+	mbOut, mbErr := r.runner.Run(ctx, "git", "-C", worktreePath, "merge-base", defaultBranch, "HEAD")
+	if mbErr == nil && len(bytes.TrimSpace(mbOut)) > 0 {
+		mb := string(bytes.TrimSpace(mbOut))
+		base = defaultBranch
+		raw, err = r.runner.Run(ctx, "git", "-C", worktreePath, "diff", "--no-color", "--binary", mb)
+	} else {
+		// Fallback if merge-base fails (e.g. detached / shallow / no shared history)
+		base = defaultBranch + "...HEAD"
+		raw, err = r.runner.Run(ctx, "git", "-C", worktreePath, "diff", "--no-color", "--binary", base)
+		if err != nil || len(raw) == 0 {
+			base = "HEAD"
+			raw, err = r.runner.Run(ctx, "git", "-C", worktreePath, "diff", "--no-color", "--binary", "HEAD")
+		}
 	}
 	if err != nil && len(raw) == 0 {
 		return Snapshot{}, fmt.Errorf("worktree diff at %s: %w", worktreePath, err)
 	}
 	rawText := string(raw)
+	untracked, untrackedErr := r.untrackedDiffsIn(ctx, worktreePath)
+	if untrackedErr != nil {
+		return Snapshot{}, untrackedErr
+	}
+	rawText += untracked
+
 	files, parseErr := diff.Parse(rawText)
 	if parseErr != nil {
 		return Snapshot{}, fmt.Errorf("parse worktree diff at %s: %w", worktreePath, parseErr)
 	}
 	hash := sha256.Sum256([]byte(fmt.Sprintf("worktree\x00%s\x00%s", worktreePath, rawText)))
-	return Snapshot{ID: fmt.Sprintf("%x", hash[:]), Mode: WorkingTree, Base: "origin/" + defaultBranch, RawDiff: rawText, Files: files}, nil
+	return Snapshot{ID: fmt.Sprintf("%x", hash[:]), Mode: WorkingTree, Base: base, RawDiff: rawText, Files: files}, nil
 }
 
 func (r Repository) untrackedDiffs(ctx context.Context) (string, error) {
-	output, err := r.run(ctx, "ls-files", "--others", "--exclude-standard", "-z")
+	return r.untrackedDiffsIn(ctx, r.Root)
+}
+
+func (r Repository) untrackedDiffsIn(ctx context.Context, dir string) (string, error) {
+	if r.runner == nil {
+		r.runner = ExecRunner{}
+	}
+	output, err := r.runner.Run(ctx, "git", "-C", dir, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return "", fmt.Errorf("list untracked files: %w", err)
 	}
@@ -120,12 +154,12 @@ func (r Repository) untrackedDiffs(ctx context.Context) (string, error) {
 		if name == "" {
 			continue
 		}
-		path := filepath.Join(r.Root, filepath.FromSlash(name))
+		path := filepath.Join(dir, filepath.FromSlash(name))
 		info, statErr := os.Stat(path)
 		if statErr != nil || info.IsDir() || info.Size() > 1024*1024 {
 			continue
 		}
-		content, diffErr := r.run(ctx, "diff", "--no-index", "--no-color", "--binary", "/dev/null", name)
+		content, diffErr := r.runner.Run(ctx, "git", "-C", dir, "diff", "--no-index", "--no-color", "--binary", "/dev/null", name)
 		if diffErr != nil && len(content) == 0 {
 			return "", fmt.Errorf("diff untracked file %s: %w", name, diffErr)
 		}

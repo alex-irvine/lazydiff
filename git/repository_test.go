@@ -164,6 +164,17 @@ func TestDefaultBranchUsesRemoteHeadThenCandidates(t *testing.T) {
 	}
 }
 
+func TestDefaultBranchChecksOriginMasterBeforeMaster(t *testing.T) {
+	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{
+		"-C /repo rev-parse --verify origin/master": []byte("abc123\n"),
+		"-C /repo rev-parse --verify master":        []byte("def456\n"),
+	}}}
+	branch, err := r.DefaultBranch(context.Background())
+	if err != nil || branch != "origin/master" {
+		t.Fatalf("branch = %q, err = %v", branch, err)
+	}
+}
+
 func TestCurrentBranchTrimsOutput(t *testing.T) {
 	r := Repository{Root: "/repo", runner: fakeRunner{outputs: map[string][]byte{
 		"-C /repo rev-parse --abbrev-ref HEAD": []byte("feature/869d6rn69-thing\n"),
@@ -332,6 +343,67 @@ func TestWorktreeSnapshotRunsDiffFromWorktreeDir(t *testing.T) {
 	}
 	if !strings.Contains(snapshot.RawDiff, "wt.txt") {
 		t.Fatalf("expected wt.txt in diff:\n%s", snapshot.RawDiff)
+	}
+}
+
+func TestWorktreeSnapshotExcludesMainDrift(t *testing.T) {
+	dir := testRepo(t)
+	runGit(t, dir, "checkout", "-b", "wt-branch")
+	runGit(t, dir, "checkout", "main")
+	wtDir := filepath.Join(t.TempDir(), "wt")
+	runGit(t, dir, "worktree", "add", wtDir, "wt-branch")
+
+	// Commit on wt-branch inside the worktree
+	if err := os.WriteFile(filepath.Join(wtDir, "wt.txt"), []byte("hello from wt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtDir, "add", "wt.txt")
+	runGit(t, wtDir, "commit", "-m", "add wt.txt")
+
+	// Commit on main in main repo after branch was created
+	if err := os.WriteFile(filepath.Join(dir, "main-drift.txt"), []byte("drift on main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "main-drift.txt")
+	runGit(t, dir, "commit", "-m", "add main-drift.txt on main")
+
+	r, err := Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := r.WorktreeSnapshot(context.Background(), wtDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(snapshot.RawDiff, "wt.txt") {
+		t.Fatalf("expected wt.txt in diff:\n%s", snapshot.RawDiff)
+	}
+	if strings.Contains(snapshot.RawDiff, "main-drift.txt") {
+		t.Fatalf("expected diff to NOT contain reverse diff of main-drift.txt, got:\n%s", snapshot.RawDiff)
+	}
+}
+
+func TestWorktreeSnapshotIncludesUntrackedInWorktree(t *testing.T) {
+	dir := testRepo(t)
+	runGit(t, dir, "checkout", "-b", "wt-branch")
+	runGit(t, dir, "checkout", "main")
+	wtDir := filepath.Join(t.TempDir(), "wt")
+	runGit(t, dir, "worktree", "add", wtDir, "wt-branch")
+
+	if err := os.WriteFile(filepath.Join(wtDir, "untracked.txt"), []byte("new untracked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := r.WorktreeSnapshot(context.Background(), wtDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(snapshot.RawDiff, "untracked.txt") {
+		t.Fatalf("expected untracked.txt in diff:\n%s", snapshot.RawDiff)
 	}
 }
 
