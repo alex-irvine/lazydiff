@@ -199,7 +199,8 @@ func (m Model) renderTree(r Rect) string {
 		if node.Hunk != nil {
 			icon = "  "
 		} else if node.File != nil {
-			icon = "📄 "
+			letter, c := fileStatusGlyph(node.File.Status)
+			icon = lipgloss.NewStyle().Foreground(c).Render(letter) + " "
 		} else if node.Expanded {
 			icon = "📂 "
 		} else {
