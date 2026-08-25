@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/alex-irvine/lazydiff/delta"
+	"github.com/alex-irvine/lazydiff/diff"
 	"github.com/alex-irvine/lazydiff/pr"
 	"github.com/alex-irvine/lazydiff/version"
 	"github.com/charmbracelet/glamour"
@@ -593,4 +594,19 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// fileStatusGlyph returns the lazygit-style change letter and its color for a
+// file's status. Binary files are un-diffable and render as a modification.
+func fileStatusGlyph(status diff.FileStatus) (string, lipgloss.Color) {
+	switch status {
+	case diff.Added:
+		return "A", lipgloss.Color("42")
+	case diff.Deleted:
+		return "D", lipgloss.Color("203")
+	case diff.Renamed:
+		return "R", lipgloss.Color("39")
+	default:
+		return "M", lipgloss.Color("214")
+	}
 }
