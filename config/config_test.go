@@ -180,3 +180,23 @@ func TestLoadDefaultModelIsEmpty(t *testing.T) {
 		t.Fatalf("default model = %q, want empty", cfg.Agent.Model)
 	}
 }
+
+func TestDetailPromptDoesNotRequireOverallDiff(t *testing.T) {
+	cfg := Default()
+	cfg.Agent.Prompts.Detail = "Explain {{selection}}\n{{change_context}}\n{{selected_diff}}"
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDefaultDetailPromptFocusesOnTheFileInView(t *testing.T) {
+	detail := Default().Agent.Prompts.Detail
+	if strings.Contains(detail, "{{overall_diff}}") {
+		t.Fatal("default detail prompt still sends the whole diff")
+	}
+	for _, want := range []string{"{{selection}}", "{{change_context}}", "{{selected_diff}}", "## Why", "## How it fits"} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("default detail prompt missing %q", want)
+		}
+	}
+}

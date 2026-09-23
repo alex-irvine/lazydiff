@@ -63,21 +63,23 @@ Overall diff:
 """
 
 detail = """
-Explain selected Git change in context of wider diff.
+Explain the file in view and how it fits the wider change.
 
 Repository: {{repository}}
 Diff mode: {{mode}}
-Target: {{selection}}
+File in view: {{selection}}
 
-Overall diff:
-{{overall_diff}}
+Wider change, as background:
+{{change_context}}
 
-Selected diff:
+Diff for {{selection}}:
 {{selected_diff}}
 """
 ```
 
-Prompt templates support `{{repository}}`, `{{mode}}`, `{{overall_diff}}`, `{{selection}}`, and `{{selected_diff}}`. Overall templates require `{{overall_diff}}`; detail templates require overall, selection, and selected-diff placeholders.
+Prompt templates support `{{repository}}`, `{{mode}}`, `{{overall_diff}}`, `{{change_context}}`, `{{selection}}`, and `{{selected_diff}}`. Overall templates require `{{overall_diff}}`; detail templates require `{{selection}}` and `{{selected_diff}}`.
+
+`{{change_context}}` is the wider change as background for the detail prompt. It expands to the full diff when that diff is under 50 KB, and degrades to an outline (one line per file with status, path, added/removed counts and each hunk header, with the file in view marked) when it is larger. The default detail prompt uses it in place of `{{overall_diff}}` so the agent keeps the surrounding context it needs to explain *why* a file changed, without an unbounded prompt on a large branch.
 
 Generic commands receive the rendered prompt through stdin:
 

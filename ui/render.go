@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/alex-irvine/lazydiff/delta"
 	"github.com/alex-irvine/lazydiff/diff"
@@ -453,7 +454,10 @@ func (m Model) analysisLines() []string {
 	}
 	lines := make([]string, 0, 4)
 	if result.Active {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("51")).Render("AGENT RESPONSE · STREAMING"))
+		lines = append(lines, m.progressLine(result))
+		if result.Text == "" {
+			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("waiting for the agent · x to cancel"))
+		}
 	}
 	if result.Stale {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("179")).Render("STALE · refresh and re-analyze for current diff"))
@@ -462,7 +466,7 @@ func (m Model) analysisLines() []string {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render("ERROR: "+result.Error.Error()))
 	}
 	text := result.Text
-	if text != "" && !result.Active && !result.Stale {
+	if text != "" && !result.Stale {
 		paneW := m.termW - 4
 		if m.termW >= 80 {
 			paneW = m.layout.Agent.W - 4
@@ -610,4 +614,24 @@ func fileStatusGlyph(status diff.FileStatus) (string, lipgloss.Color) {
 	default:
 		return "M", lipgloss.Color("214")
 	}
+}
+
+// progressLine is the animated feedback shown while an agent request is still
+// running: a spinner, what is being explained, and how long it has taken.
+func (m Model) progressLine(result *analysisResult) string {
+	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+	label := "Analysing the whole change"
+	if m.activeTab == DetailTab {
+		if file, hunk, ok := m.tree.Selected(); ok {
+			label = "Explaining " + file.DisplayPath()
+			if hunk != nil {
+				label += " " + hunk.Header
+			}
+		}
+	}
+	elapsed := ""
+	if !result.Started.IsZero() {
+		elapsed = fmt.Sprintf(" · %ds", int(time.Since(result.Started).Seconds()))
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("51")).Render(frame + " " + label + elapsed)
 }

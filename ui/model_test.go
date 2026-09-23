@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -421,9 +422,12 @@ func TestModelRefreshAndAnalysisContext(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("detail key did not create command")
 	}
-	cmd()
-	if len(runner.requests) != 1 || !strings.Contains(runner.requests[0].Prompt, "Selected diff:") || !strings.Contains(runner.requests[0].Prompt, "@@ -1 +1 @@") {
+	runAnalysisCmd(cmd)
+	if len(runner.requests) != 1 || !strings.Contains(runner.requests[0].Prompt, "File in view: a.go") || !strings.Contains(runner.requests[0].Prompt, "@@ -1 +1 @@") {
 		t.Fatalf("requests = %+v", runner.requests)
+	}
+	if !strings.Contains(runner.requests[0].Prompt, "diff --git a/a.go b/a.go") {
+		t.Fatal("detail prompt is missing the wider-change context")
 	}
 }
 
@@ -465,7 +469,7 @@ func TestModelCancellation(t *testing.T) {
 		t.Fatal("analysis command missing")
 	}
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-	cmd()
+	runAnalysisCmd(cmd)
 	if runner.cancelled == false {
 		t.Fatal("runner was not cancelled")
 	}
@@ -824,7 +828,7 @@ func TestXCancelsActiveAnalysis(t *testing.T) {
 	model.termW, model.termH = 120, 40
 	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-	cmd()
+	runAnalysisCmd(cmd)
 	if runner.cancelled == false {
 		t.Fatal("x did not cancel the running analysis")
 	}
@@ -1335,4 +1339,38 @@ func TestEscKeyFromWorktreeDiffGoesToSelector(t *testing.T) {
 	if model.treeMode != TreeModeWorktree {
 		t.Fatalf("treeMode = %d, want Worktree", model.treeMode)
 	}
+}
+
+// runAnalysisCmd executes an analysis command, flattening the tea.Batch that
+// pairs the agent request with the spinner ticker, and returns the agent's
+// message (spinner ticks are discarded).
+func runAnalysisCmd(cmd tea.Cmd) tea.Msg {
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return msg
+	}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var result tea.Msg
+	for _, child := range batch {
+		if child == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(child tea.Cmd) {
+			defer wg.Done()
+			childMsg := child()
+			if _, isTick := childMsg.(spinnerTickMsg); isTick {
+				return
+			}
+			mu.Lock()
+			if result == nil {
+				result = childMsg
+			}
+			mu.Unlock()
+		}(child)
+	}
+	wg.Wait()
+	return result
 }

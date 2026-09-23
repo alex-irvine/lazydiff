@@ -67,16 +67,17 @@ type filePRConfig struct {
 var placeholderPattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
 
 var allowedPlaceholders = map[string]struct{}{
-	"repository":    {},
-	"mode":          {},
-	"overall_diff":  {},
-	"selection":     {},
-	"selected_diff": {},
-	"staged_diff":   {},
-	"branch_diff":   {},
-	"ticket":        {},
-	"branch":        {},
-	"base_branch":   {},
+	"repository":     {},
+	"mode":           {},
+	"overall_diff":   {},
+	"change_context": {},
+	"selection":      {},
+	"selected_diff":  {},
+	"staged_diff":    {},
+	"branch_diff":    {},
+	"ticket":         {},
+	"branch":         {},
+	"base_branch":    {},
 }
 
 func Default() Config {
@@ -174,7 +175,7 @@ func (c Config) Validate() error {
 	if err := validateTemplate("overall", c.Agent.Prompts.Overall, "overall_diff"); err != nil {
 		return err
 	}
-	if err := validateTemplate("detail", c.Agent.Prompts.Detail, "overall_diff", "selection", "selected_diff"); err != nil {
+	if err := validateTemplate("detail", c.Agent.Prompts.Detail, "selection", "selected_diff"); err != nil {
 		return err
 	}
 	if err := validateTemplate("commit_message", c.Agent.Prompts.CommitMessage, "staged_diff"); err != nil {
@@ -232,19 +233,32 @@ Overall diff:
 
 Explain the purpose of this change, its architecture impact, risks, and likely testing gaps. Return concise Markdown. Do not modify files, run mutating commands, use network access, or use MCP tools.`
 
-const defaultDetailPrompt = `You are explaining one Git change in read-only mode.
+const defaultDetailPrompt = `You are explaining one file of a larger Git change, in read-only mode.
 
 Repository: {{repository}}
 Diff mode: {{mode}}
-Selected target: {{selection}}
+File in view: {{selection}}
 
-Overall diff:
-{{overall_diff}}
+The wider change this file belongs to, as background — read it to understand the intent, but do not review or explain any file other than {{selection}}:
+{{change_context}}
 
-Selected diff:
+Diff for {{selection}}:
 {{selected_diff}}
 
-Explain why this file or hunk exists, how it relates to the wider change, and any risks or inconsistencies. Return concise Markdown. Do not modify files, run mutating commands, use network access, or use MCP tools.`
+Explain the change to {{selection}} and nothing else. Use exactly these Markdown headings, in this order:
+
+## What changed
+Two or three sentences on what this file now does differently.
+
+## Why
+The reason for this change, inferred from the code itself. Prefer the concrete motivation over a restatement of the diff.
+
+## How it fits
+How this file connects to the rest of the wider change above: what it enables, what depends on it, what would be incomplete without it. Name the specific other files or functions it works with.
+
+Only if something in this file contradicts the wider change, add a final "## Watch out" section of at most two sentences. Otherwise omit it entirely.
+
+Do not review the other files, do not produce a code review, and do not list risks, test gaps, style notes, or suggestions. Keep the whole answer under 250 words. Return Markdown. Do not modify files, run mutating commands, use network access, or use MCP tools.`
 
 const defaultTicketPattern = `(?:^|[-/_])([0-9a-z]{6,10})(?:[-_]|$)`
 

@@ -9,16 +9,17 @@ import (
 )
 
 type Context struct {
-	Repository   string
-	Mode         string
-	OverallDiff  string
-	Selection    string
-	SelectedDiff string
-	StagedDiff   string
-	BranchDiff   string
-	Ticket       string
-	Branch       string
-	BaseBranch   string
+	Repository    string
+	Mode          string
+	OverallDiff   string
+	ChangeContext string
+	Selection     string
+	SelectedDiff  string
+	StagedDiff    string
+	BranchDiff    string
+	Ticket        string
+	Branch        string
+	BaseBranch    string
 }
 
 // Sources holds the raw (unparsed) template text for every prompt lazydiff
@@ -40,23 +41,24 @@ type Templates struct {
 var placeholderPattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
 
 var allowedPlaceholders = map[string]struct{}{
-	"repository":    {},
-	"mode":          {},
-	"overall_diff":  {},
-	"selection":     {},
-	"selected_diff": {},
-	"staged_diff":   {},
-	"branch_diff":   {},
-	"ticket":        {},
-	"branch":        {},
-	"base_branch":   {},
+	"repository":     {},
+	"mode":           {},
+	"overall_diff":   {},
+	"change_context": {},
+	"selection":      {},
+	"selected_diff":  {},
+	"staged_diff":    {},
+	"branch_diff":    {},
+	"ticket":         {},
+	"branch":         {},
+	"base_branch":    {},
 }
 
 func Parse(sources Sources) (Templates, error) {
 	if err := validate("overall", sources.Overall, "overall_diff"); err != nil {
 		return Templates{}, err
 	}
-	if err := validate("detail", sources.Detail, "overall_diff", "selection", "selected_diff"); err != nil {
+	if err := validate("detail", sources.Detail, "selection", "selected_diff"); err != nil {
 		return Templates{}, err
 	}
 	if err := validate("commit_message", sources.CommitMessage, "staged_diff"); err != nil {
@@ -111,16 +113,17 @@ func render(t *template.Template, ctx Context) (string, error) {
 	}
 	var out bytes.Buffer
 	if err := t.Execute(&out, map[string]string{
-		"repository":    ctx.Repository,
-		"mode":          ctx.Mode,
-		"overall_diff":  ctx.OverallDiff,
-		"selection":     ctx.Selection,
-		"selected_diff": ctx.SelectedDiff,
-		"staged_diff":   ctx.StagedDiff,
-		"branch_diff":   ctx.BranchDiff,
-		"ticket":        ctx.Ticket,
-		"branch":        ctx.Branch,
-		"base_branch":   ctx.BaseBranch,
+		"repository":     ctx.Repository,
+		"mode":           ctx.Mode,
+		"overall_diff":   ctx.OverallDiff,
+		"change_context": ctx.ChangeContext,
+		"selection":      ctx.Selection,
+		"selected_diff":  ctx.SelectedDiff,
+		"staged_diff":    ctx.StagedDiff,
+		"branch_diff":    ctx.BranchDiff,
+		"ticket":         ctx.Ticket,
+		"branch":         ctx.Branch,
+		"base_branch":    ctx.BaseBranch,
 	}); err != nil {
 		return "", fmt.Errorf("render prompt: %w", err)
 	}

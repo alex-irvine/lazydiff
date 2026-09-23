@@ -90,10 +90,11 @@ type PRReviewer interface {
 }
 
 type analysisResult struct {
-	Text   string
-	Stale  bool
-	Active bool
-	Error  error
+	Text    string
+	Stale   bool
+	Active  bool
+	Started time.Time
+	Error   error
 }
 
 type Model struct {
@@ -107,43 +108,45 @@ type Model struct {
 	opener    pr.Opener
 	dialog    *ActionDialog
 
-	snapshot       git.Snapshot
-	haveSnap       bool
-	mode           git.Mode
-	treeMode       TreeMode
-	branchSelector    *BranchSelector
-	worktreeSelector  *WorktreeSelector
-	selectedWorktree  string // path of the selected worktree
-	prSelector        *PRSelector
-	prReviewer     PRReviewer
-	pendingPRKey   rune
-	confirm        *ConfirmDialog
-	tree           *TreeModel
-	layout         Layout
-	termW          int
-	termH          int
-	focus          Focus
-	activeTab      AnalysisTab
-	diffScroll     int
-	analysisScroll int
-	diffText       string
-	diffWarn       error
-	diffStyled     bool
-	results        map[string]*analysisResult
-	requests       map[string]context.CancelFunc
-	requestSeq     uint64
-	status         string
-	showHelp       bool
-	showUpdateModal bool
-	showUpdating    bool
-	updateVersion   string
-	updateError     error
-	updateManual    bool
-	updateStatus    string
-	send           func(tea.Msg)
-	searchActive   bool
-	searchQuery    string
-	searchFilter   *regexp.Regexp
+	snapshot         git.Snapshot
+	haveSnap         bool
+	mode             git.Mode
+	treeMode         TreeMode
+	branchSelector   *BranchSelector
+	worktreeSelector *WorktreeSelector
+	selectedWorktree string // path of the selected worktree
+	prSelector       *PRSelector
+	prReviewer       PRReviewer
+	pendingPRKey     rune
+	confirm          *ConfirmDialog
+	tree             *TreeModel
+	layout           Layout
+	termW            int
+	termH            int
+	focus            Focus
+	activeTab        AnalysisTab
+	diffScroll       int
+	analysisScroll   int
+	diffText         string
+	diffWarn         error
+	diffStyled       bool
+	results          map[string]*analysisResult
+	requests         map[string]context.CancelFunc
+	requestSeq       uint64
+	status           string
+	showHelp         bool
+	showUpdateModal  bool
+	showUpdating     bool
+	updateVersion    string
+	updateError      error
+	updateManual     bool
+	updateStatus     string
+	send             func(tea.Msg)
+	spinnerFrame     int
+	spinnerActive    bool
+	searchActive     bool
+	searchQuery      string
+	searchFilter     *regexp.Regexp
 }
 
 type snapshotMsg struct{ Snapshot git.Snapshot }
@@ -165,6 +168,7 @@ type analysisDoneMsg struct {
 }
 type refreshMsg struct{}
 type refreshTickMsg struct{}
+type spinnerTickMsg struct{}
 type updateResultMsg struct {
 	HasUpdate bool
 	Version   string
@@ -277,6 +281,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, m.refreshCmd()
 	case refreshMsg, refreshTickMsg:
 		return m, m.refreshCmd()
+	case spinnerTickMsg:
+		if !m.anyAnalysisActive() {
+			m.spinnerActive = false
+			return m, nil
+		}
+		m.spinnerFrame++
+		return m, spinnerCmd()
 	case snapshotMsg:
 		changed := m.applySnapshot(message.Snapshot)
 		if changed {
@@ -831,10 +842,10 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.activeTab = OverallTab
-		return m, m.startAnalysis(false)
+		return m, m.withSpinner(m.startAnalysis(false))
 	case "A":
 		m.activeTab = DetailTab
-		return m, m.startAnalysis(true)
+		return m, m.withSpinner(m.startAnalysis(true))
 	case "/":
 		if m.focus == FocusTree {
 			m.searchActive = true
@@ -1180,7 +1191,8 @@ func (m Model) startAnalysis(detail bool) tea.Cmd {
 		m.results[key] = result
 	}
 	result.Text, result.Active, result.Error, result.Stale = "", true, nil, false
-	ctxPrompt := prompt.Context{Repository: m.repo.Root, Mode: m.snapshot.Mode.String(), OverallDiff: m.snapshot.RawDiff, Selection: file.DisplayPath(), SelectedDiff: file.RawDiff()}
+	result.Started = time.Now()
+	ctxPrompt := prompt.Context{Repository: m.repo.Root, Mode: m.snapshot.Mode.String(), OverallDiff: m.snapshot.RawDiff, Selection: file.DisplayPath(), SelectedDiff: file.RawDiff(), ChangeContext: changeContext(m.snapshot, file.ID)}
 	if hunk != nil {
 		ctxPrompt.Selection += " " + hunk.Header
 		ctxPrompt.SelectedDiff = hunk.RawDiff()
@@ -1483,4 +1495,93 @@ func nodeSearchLabel(n *TreeNode) string {
 		return n.File.DisplayPath()
 	}
 	return n.Label
+}
+
+// changeContextBudget is how much of the wider diff the detail prompt will
+// carry verbatim. Below it the agent sees the real surrounding change, which
+// is what lets it explain why a file changed; above it the diff would dominate
+// the prompt and slow the response, so it degrades to a structural summary.
+const changeContextBudget = 50000
+
+// changeContext describes the rest of the change to the detail prompt: the
+// full diff when it fits the budget, otherwise a per-file outline built from
+// hunk headers (which carry git's enclosing function/section context).
+func changeContext(snapshot git.Snapshot, selectedID string) string {
+	if len(snapshot.Files) == 0 {
+		return "(this file is the whole change)"
+	}
+	if len(snapshot.RawDiff) <= changeContextBudget {
+		return snapshot.RawDiff
+	}
+	return changeOutline(snapshot.Files, selectedID)
+}
+
+func changeOutline(files []diff.File, selectedID string) string {
+	const maxFiles = 60
+	const maxHunksPerFile = 8
+	lines := make([]string, 0, len(files)*2)
+	lines = append(lines, "(the full diff is too large to include; this is an outline of it)")
+	for i, file := range files {
+		if i == maxFiles {
+			lines = append(lines, fmt.Sprintf("... and %d more files", len(files)-maxFiles))
+			break
+		}
+		added, removed := countChangedLines(file.Raw)
+		line := fmt.Sprintf("- %s %s (+%d/-%d)", file.Status, file.DisplayPath(), added, removed)
+		if file.ID == selectedID {
+			line += "  <- the file in view"
+		}
+		lines = append(lines, line)
+		for j, hunk := range file.Hunks {
+			if j == maxHunksPerFile {
+				lines = append(lines, fmt.Sprintf("    ... and %d more hunks", len(file.Hunks)-maxHunksPerFile))
+				break
+			}
+			lines = append(lines, "    "+strings.TrimSpace(hunk.Header))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func countChangedLines(raw string) (int, int) {
+	added, removed := 0, 0
+	for _, line := range strings.Split(raw, "\n") {
+		switch {
+		case strings.HasPrefix(line, "+++"), strings.HasPrefix(line, "---"):
+		case strings.HasPrefix(line, "+"):
+			added++
+		case strings.HasPrefix(line, "-"):
+			removed++
+		}
+	}
+	return added, removed
+}
+
+var spinnerFrames = []string{"\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"}
+
+func spinnerCmd() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return spinnerTickMsg{} })
+}
+
+// withSpinner starts the spinner animation alongside an analysis command, so
+// the pane shows progress while the agent is still thinking. Only one ticker
+// runs at a time no matter how many analyses are in flight.
+func (m *Model) withSpinner(cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	if m.spinnerActive {
+		return cmd
+	}
+	m.spinnerActive = true
+	return tea.Batch(cmd, spinnerCmd())
+}
+
+func (m Model) anyAnalysisActive() bool {
+	for _, result := range m.results {
+		if result != nil && result.Active {
+			return true
+		}
+	}
+	return false
 }
