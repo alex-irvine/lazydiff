@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -99,5 +100,22 @@ func TestSpinnerTickStopsWhenNothingIsActive(t *testing.T) {
 	model, cmd := model.Update(spinnerTickMsg{})
 	if cmd != nil || model.spinnerActive {
 		t.Fatal("spinner kept ticking with no active analysis")
+	}
+}
+
+func TestExplainerShowsAgentDiagnosticWhileWaitingAndOnFailure(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.snapshot = makeSnapshot("one")
+	model.haveSnap = true
+	model.tree = NewTree(model.snapshot.Files)
+	key := activeResultKey(model)
+	model.results[key] = &analysisResult{Active: true}
+	model, _ = model.Update(analysisOutputMsg{Key: key, Text: "provider retrying", Diagnostic: true})
+	if text := strings.Join(model.analysisLines(), "\n"); !strings.Contains(text, "Agent: provider retrying") || strings.Contains(text, "provider retrying\nprovider retrying") {
+		t.Fatalf("waiting lines = %q", text)
+	}
+	model, _ = model.Update(analysisDoneMsg{Key: key, Error: context.DeadlineExceeded})
+	if text := strings.Join(model.analysisLines(), "\n"); !strings.Contains(text, "Agent: provider retrying") {
+		t.Fatalf("failed lines = %q", text)
 	}
 }

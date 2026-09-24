@@ -82,11 +82,12 @@ type PRReviewer interface {
 }
 
 type analysisResult struct {
-	Text    string
-	Stale   bool
-	Active  bool
-	Started time.Time
-	Error   error
+	Text       string
+	Diagnostic string
+	Stale      bool
+	Active     bool
+	Started    time.Time
+	Error      error
 }
 
 type Model struct {
@@ -148,8 +149,9 @@ type deltaMsg struct {
 	Warning error
 }
 type analysisOutputMsg struct {
-	Key  string
-	Text string
+	Key        string
+	Text       string
+	Diagnostic bool
 }
 type analysisDoneMsg struct {
 	Key   string
@@ -365,6 +367,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if result == nil {
 			result = &analysisResult{Active: true}
 			m.results[message.Key] = result
+		}
+		if message.Diagnostic {
+			if strings.TrimSpace(message.Text) != "" {
+				result.Diagnostic = message.Text
+			}
+			return m, nil
 		}
 		if result.Text != "" {
 			result.Text += "\n"
@@ -1165,7 +1173,7 @@ func (m Model) startAnalysis(detail bool) tea.Cmd {
 		result = &analysisResult{}
 		m.results[key] = result
 	}
-	result.Text, result.Active, result.Error, result.Stale = "", true, nil, false
+	result.Text, result.Diagnostic, result.Active, result.Error, result.Stale = "", "", true, nil, false
 	result.Started = time.Now()
 	ctxPrompt := prompt.Context{Repository: m.repo.Root, Mode: m.snapshot.Mode.String(), OverallDiff: m.snapshot.RawDiff, Selection: file.DisplayPath(), SelectedDiff: file.RawDiff(), ChangeContext: changeContext(m.snapshot, file.ID)}
 	if hunk != nil {
@@ -1183,7 +1191,7 @@ func (m Model) startAnalysis(detail bool) tea.Cmd {
 		result.Active, result.Error = false, err
 		return nil
 	}
-	runner, send, snapshotID := m.runner, m.send, m.snapshot.ID
+	runner, send := m.runner, m.send
 	return func() tea.Msg {
 		var output strings.Builder
 		err := runner.Run(ctx, agent.Request{RepoRoot: m.repo.Root, Prompt: rendered}, func(event agent.Event) {
@@ -1196,7 +1204,7 @@ func (m Model) startAnalysis(detail bool) tea.Cmd {
 					send(analysisOutputMsg{Key: key, Text: event.Text})
 				}
 			} else if send != nil {
-				send(analysisOutputMsg{Key: requestLogKey(snapshotID), Text: event.Text})
+				send(analysisOutputMsg{Key: key, Text: event.Text, Diagnostic: true})
 			}
 		})
 		return analysisDoneMsg{Key: key, Seq: seq, Text: output.String(), Error: err}
@@ -1397,8 +1405,6 @@ func resultKeySnapshot(key string) string {
 	}
 	return parts[1]
 }
-
-func requestLogKey(snapshot string) string { return "request:" + snapshot + ":log" }
 
 func checkUpdateCmd(auto bool) tea.Cmd {
 	return func() tea.Msg {

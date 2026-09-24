@@ -452,6 +452,9 @@ func (m Model) analysisLines() []string {
 			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("waiting for the agent · x to cancel"))
 		}
 	}
+	if result.Diagnostic != "" && (result.Active || result.Error != nil) {
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("179")).Render("Agent: "+result.Diagnostic))
+	}
 	if result.Stale {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("179")).Render("STALE · refresh and re-analyze for current diff"))
 	}
