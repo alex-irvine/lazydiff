@@ -382,16 +382,8 @@ func (m Model) renderDiff(r Rect) string {
 
 func (m Model) renderAnalysis(r Rect) string {
 	green := lipgloss.Color("42")
-	dim := lipgloss.Color("245")
 	active := lipgloss.NewStyle().Foreground(green).Bold(true).Render
-	inactive := lipgloss.NewStyle().Foreground(dim).Render
-	tabNames := []string{"Detail", "Overall", "Request Log"}
-	title := active("[3] " + tabNames[m.activeTab])
-	for i, name := range tabNames {
-		if i != int(m.activeTab) {
-			title += "  " + inactive(name)
-		}
-	}
+	title := active("[3] Explainer")
 	displayLines := []string{delta.Truncate(title, max(1, r.W-2))}
 	content := wrapContent(m.analysisLines(), max(1, r.W-4))
 	start := min(m.analysisScroll, len(content))
@@ -450,7 +442,8 @@ func (m Model) analysisLines() []string {
 	key := activeResultKey(m)
 	result := m.results[key]
 	if result == nil {
-		return []string{lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Press a for overall or A for selected detail.")}
+		hint := "Press a to explain why the selected file changed."
+		return []string{lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(hint)}
 	}
 	lines := make([]string, 0, 4)
 	if result.Active {
@@ -485,10 +478,7 @@ func activeResultKey(m Model) string {
 	if !ok {
 		return ""
 	}
-	if m.activeTab == RequestLogTab {
-		return requestLogKey(m.snapshot.ID)
-	}
-	return resultKey(m.snapshot.ID, m.activeTab == DetailTab, file.ID, hunk)
+	return resultKey(m.snapshot.ID, true, file.ID, hunk)
 }
 
 func (m Model) statusLine() string {
@@ -548,13 +538,12 @@ func (m Model) helpText() string {
 		key("r", "Refresh PR list / PR diff"),
 		"",
 		section("Analysis"),
-		key("a / A", "Overall / detail review"),
-		key("[/]", "Switch analysis tab"),
+		key("a", "Explain why the selected change exists"),
 		key("x", "Cancel running analysis"),
 		"",
 		section("General"),
 		key("r", "Refresh snapshot"),
-		key("[/]", "Cycle left pane / analysis tab"),
+		key("[/]", "Cycle left pane"),
 		key("u", "Check for update"),
 		key("? / esc", "Close this help"),
 		key("q", "Quit"),
@@ -620,13 +609,11 @@ func fileStatusGlyph(status diff.FileStatus) (string, lipgloss.Color) {
 // running: a spinner, what is being explained, and how long it has taken.
 func (m Model) progressLine(result *analysisResult) string {
 	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
-	label := "Analysing the whole change"
-	if m.activeTab == DetailTab {
-		if file, hunk, ok := m.tree.Selected(); ok {
-			label = "Explaining " + file.DisplayPath()
-			if hunk != nil {
-				label += " " + hunk.Header
-			}
+	label := "Explaining the selected change"
+	if file, hunk, ok := m.tree.Selected(); ok {
+		label = "Explaining " + file.DisplayPath()
+		if hunk != nil {
+			label += " " + hunk.Header
 		}
 	}
 	elapsed := ""

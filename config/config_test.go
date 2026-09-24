@@ -194,7 +194,7 @@ func TestDefaultDetailPromptFocusesOnTheFileInView(t *testing.T) {
 	if strings.Contains(detail, "{{overall_diff}}") {
 		t.Fatal("default detail prompt still sends the whole diff")
 	}
-	for _, want := range []string{"{{selection}}", "{{change_context}}", "{{selected_diff}}", "## Why", "## How it fits"} {
+	for _, want := range []string{"{{selection}}", "{{change_context}}", "{{selected_diff}}", "Explain why", "how it contributes to the wider change", "not a code review", "Do not review the other files or add security assessments"} {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("default detail prompt missing %q", want)
 		}

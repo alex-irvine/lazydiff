@@ -223,7 +223,7 @@ func validateTemplate(name, source string, required ...string) error {
 	return nil
 }
 
-const defaultOverallPrompt = `You are reviewing a Git change in read-only mode.
+const defaultOverallPrompt = `You are explaining why a Git change exists, in read-only mode.
 
 Repository: {{repository}}
 Diff mode: {{mode}}
@@ -231,9 +231,11 @@ Diff mode: {{mode}}
 Overall diff:
 {{overall_diff}}
 
-Explain the purpose of this change, its architecture impact, risks, and likely testing gaps. Return concise Markdown. Do not modify files, run mutating commands, use network access, or use MCP tools.`
+Explain the concrete problem this change addresses, why the changed behavior is needed, and how the main pieces work together to achieve it. Lead with the motivation, using specific evidence from the diff. Distinguish inferred intent from facts; if the motivation is unclear, say so rather than inventing it.
 
-const defaultDetailPrompt = `You are explaining one file of a larger Git change, in read-only mode.
+This is an explanation, not a code review. Do not add security assessments, risk lists, testing gaps, style notes, recommendations, or review verdicts. Use short paragraphs or a few bullets, without review-style sections. Keep the whole answer under 250 words. Return Markdown. Do not modify files, run mutating commands, use network access, or use MCP tools.`
+
+const defaultDetailPrompt = `You are explaining why one file changed as part of a larger Git change, in read-only mode.
 
 Repository: {{repository}}
 Diff mode: {{mode}}
@@ -245,20 +247,9 @@ The wider change this file belongs to, as background — read it to understand t
 Diff for {{selection}}:
 {{selected_diff}}
 
-Explain the change to {{selection}} and nothing else. Use exactly these Markdown headings, in this order:
+Explain why {{selection}} needed to change. Lead with the concrete problem or motivation, then explain the changed behavior and how it contributes to the wider change. Name specific related files or functions only to explain this file's role. Distinguish inferred intent from facts; if the motivation is unclear, say so rather than inventing it.
 
-## What changed
-Two or three sentences on what this file now does differently.
-
-## Why
-The reason for this change, inferred from the code itself. Prefer the concrete motivation over a restatement of the diff.
-
-## How it fits
-How this file connects to the rest of the wider change above: what it enables, what depends on it, what would be incomplete without it. Name the specific other files or functions it works with.
-
-Only if something in this file contradicts the wider change, add a final "## Watch out" section of at most two sentences. Otherwise omit it entirely.
-
-Do not review the other files, do not produce a code review, and do not list risks, test gaps, style notes, or suggestions. Keep the whole answer under 250 words. Return Markdown. Do not modify files, run mutating commands, use network access, or use MCP tools.`
+This is an explanation, not a code review. Do not review the other files or add security assessments, risk lists, testing gaps, style notes, recommendations, or review verdicts. Use short paragraphs or a few bullets, without review-style sections. Keep the whole answer under 250 words. Return Markdown. Do not modify files, run mutating commands, use network access, or use MCP tools.`
 
 const defaultTicketPattern = `(?:^|[-/_])([0-9a-z]{6,10})(?:[-_]|$)`
 

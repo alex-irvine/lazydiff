@@ -50,14 +50,6 @@ const (
 	FocusAnalysis
 )
 
-type AnalysisTab int
-
-const (
-	DetailTab AnalysisTab = iota
-	OverallTab
-	RequestLogTab
-)
-
 type SnapshotLoader interface {
 	Snapshot(context.Context, git.Mode) (git.Snapshot, error)
 	SnapshotBranch(context.Context, string) (git.Snapshot, error)
@@ -124,7 +116,6 @@ type Model struct {
 	termW            int
 	termH            int
 	focus            Focus
-	activeTab        AnalysisTab
 	diffScroll       int
 	analysisScroll   int
 	diffText         string
@@ -234,7 +225,7 @@ func NewModel(repo git.Repository, cfg config.Config, loader SnapshotLoader, ren
 	return Model{
 		repo: repo, cfg: cfg, loader: loader, renderer: renderer, runner: runner, templates: templates,
 		mutator: mutator, opener: opener, prReviewer: prReviewer,
-		mode: git.WorkingTree, treeMode: TreeModeWorktree, tree: NewTree(nil), focus: FocusTree, activeTab: DetailTab,
+		mode: git.WorkingTree, treeMode: TreeModeWorktree, tree: NewTree(nil), focus: FocusTree,
 		results: make(map[string]*analysisResult), requests: make(map[string]context.CancelFunc),
 		status: "loading repository",
 	}
@@ -783,13 +774,7 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			return m, m.renderSelectedCmd()
 		}
 	case "[":
-		if m.focus == FocusAnalysis {
-			if m.activeTab > 0 {
-				m.activeTab--
-			} else {
-				m.activeTab = RequestLogTab
-			}
-		} else if m.focus == FocusTree {
+		if m.focus == FocusTree {
 			switch m.treeMode {
 			case TreeModePRSelector:
 				m.treeMode = TreeModeBranchSelector
@@ -803,13 +788,7 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		}
 	case "]":
-		if m.focus == FocusAnalysis {
-			if m.activeTab < RequestLogTab {
-				m.activeTab++
-			} else {
-				m.activeTab = DetailTab
-			}
-		} else if m.focus == FocusTree {
+		if m.focus == FocusTree {
 			switch m.treeMode {
 			case TreeModeWorktree, TreeModeWorktreeDiff, TreeModeStaged:
 				m.treeMode = TreeModeBranchSelector
@@ -841,10 +820,6 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			m.confirm = NewConfirmDialog(ApproveDialog, fmt.Sprintf("Approve PR #%d (%s)", num, title))
 			return m, nil
 		}
-		m.activeTab = OverallTab
-		return m, m.withSpinner(m.startAnalysis(false))
-	case "A":
-		m.activeTab = DetailTab
 		return m, m.withSpinner(m.startAnalysis(true))
 	case "/":
 		if m.focus == FocusTree {

@@ -105,7 +105,7 @@ func TestPTYAnalysisStreamsAndNarrowLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = readUntil(t, terminal, "DIFF", 3*time.Second)
-	if _, err := terminal.Write([]byte("A")); err != nil {
+	if _, err := terminal.Write([]byte("a")); err != nil {
 		t.Fatal(err)
 	}
 	output := readUntil(t, terminal, "analysis-output", 3*time.Second)

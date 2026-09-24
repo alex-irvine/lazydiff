@@ -83,7 +83,6 @@ func TestAnalysisLinesShowSpinnerWhileActive(t *testing.T) {
 	model.haveSnap = true
 	model.tree = NewTree(model.snapshot.Files)
 	model.termW, model.termH = 120, 40
-	model.activeTab = DetailTab
 	model.results[activeResultKey(model)] = &analysisResult{Active: true, Started: time.Now().Add(-3 * time.Second)}
 	joined := strings.Join(model.analysisLines(), "\n")
 	if !strings.Contains(joined, spinnerFrames[0]) || !strings.Contains(joined, "Explaining a.go") {

@@ -418,7 +418,7 @@ func TestModelRefreshAndAnalysisContext(t *testing.T) {
 	model.focus = FocusTree
 	model.tree.Toggle()
 	model.tree.Move(1)
-	model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	if cmd == nil {
 		t.Fatal("detail key did not create command")
 	}
@@ -441,9 +441,12 @@ func TestModelMarksCompletedResultStaleAfterRefresh(t *testing.T) {
 	model.tree = NewTree(model.snapshot.Files)
 	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	if cmd == nil {
-		t.Fatal("overall key did not create command")
+		t.Fatal("explain key did not create command")
 	}
-	cmd()
+	runAnalysisCmd(cmd)
+	if len(runner.requests) != 1 || !strings.Contains(runner.requests[0].Prompt, "File in view:") {
+		t.Fatalf("explainer requests = %+v", runner.requests)
+	}
 	model, cmd = model.Update(refreshMsg{})
 	if cmd == nil {
 		t.Fatal("refresh message did not schedule refresh")
@@ -1168,13 +1171,14 @@ func TestEnterOnPRSelectorLoadsPRDiff(t *testing.T) {
 	}
 }
 
-func TestBracketKeysStillCycleAnalysisTabsWhenFocusIsAnalysis(t *testing.T) {
+func TestBracketKeysLeaveExplainerUnchanged(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	model.focus = FocusAnalysis
-	model.activeTab = DetailTab
+	before := model.renderAnalysis(Rect{W: 80, H: 20})
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	if model.activeTab != OverallTab {
-		t.Fatalf("activeTab = %d, want OverallTab", model.activeTab)
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	if after := model.renderAnalysis(Rect{W: 80, H: 20}); after != before || !strings.Contains(after, "Explainer") {
+		t.Fatalf("explainer changed: %q", after)
 	}
 }
 

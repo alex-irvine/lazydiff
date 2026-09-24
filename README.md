@@ -53,7 +53,7 @@ allow_external_tools = false
 
 [agent.prompts]
 overall = """
-Review overall Git change.
+Explain why this Git change exists and how its main pieces work together. Lead with the concrete motivation supported by the diff; label uncertain intent. Do not produce a code review, security assessment, risk list, testing gaps, or recommendations. Keep the answer under 250 words.
 
 Repository: {{repository}}
 Diff mode: {{mode}}
@@ -63,7 +63,7 @@ Overall diff:
 """
 
 detail = """
-Explain the file in view and how it fits the wider change.
+Explain why the file in view needed to change and how it contributes to the wider change. Lead with the concrete motivation supported by the diff; label uncertain intent. Do not produce a code review, security assessment, risk list, testing gaps, or recommendations. Keep the answer under 250 words.
 
 Repository: {{repository}}
 Diff mode: {{mode}}
@@ -76,6 +76,8 @@ Diff for {{selection}}:
 {{selected_diff}}
 """
 ```
+
+Omit `[agent.prompts]` to use the built-in explanation prompts. Custom templates replace those defaults and do not receive future prompt updates automatically.
 
 Prompt templates support `{{repository}}`, `{{mode}}`, `{{overall_diff}}`, `{{change_context}}`, `{{selection}}`, and `{{selected_diff}}`. Overall templates require `{{overall_diff}}`; detail templates require `{{selection}}` and `{{selected_diff}}`.
 
@@ -98,10 +100,10 @@ Commands execute directly without shell parsing. Copilot requests use a restrict
 Tab / Shift+Tab  move focus
 Up / Down        navigate focused pane
 Space            expand/collapse file
-a                analyze overall diff
-A                analyze selected file or hunk
-1 / 2 / 3        detail / overall / request log tab
-c                cancel active analysis
+a                explain why the selected change exists
+1 / 2 / 3        focus files / diff / analysis pane
+[ / ]            cycle left pane when focused
+x                cancel active analysis
 m                cycle diff mode
 r                refresh Git snapshot
 g / G            top / bottom
