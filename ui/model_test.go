@@ -488,6 +488,33 @@ func TestModelMarksCompletedResultStaleAfterRefresh(t *testing.T) {
 	}
 }
 
+func TestExplainerRemainsVisibleAfterDiffChangesOnRefresh(t *testing.T) {
+	model := newTestModel(&fakeLoader{}, &fakeRunner{})
+	first := makeSnapshot("before")
+	model.applySnapshot(first)
+	cmd := model.startAnalysis(true)
+	if cmd == nil {
+		t.Fatal("analysis command missing")
+	}
+	key := activeResultKey(model)
+	model.results[key].Text = "Why this changed"
+	model.results[key].Active = false
+	updated := makeSnapshot("after")
+	updated.Files[0].ID = "new-status:a.go"
+	model.applySnapshot(updated)
+	if activeResultKey(model) != key {
+		t.Fatal("refreshed selection lost its previous explanation")
+	}
+	lines := strings.Join(model.analysisLines(), "\n")
+	if !strings.Contains(lines, "Why this changed") || !strings.Contains(lines, "STALE") {
+		t.Fatalf("refreshed explanation = %q", lines)
+	}
+	model.tree.Move(1)
+	if activeResultKey(model) == key {
+		t.Fatal("previous file's explanation shown for a different selection")
+	}
+}
+
 func TestModelCancellation(t *testing.T) {
 	loader := &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}
 	runner := &blockingRunner{}

@@ -481,7 +481,18 @@ func activeResultKey(m Model) string {
 	if !ok {
 		return ""
 	}
-	return resultKey(m.snapshot.ID, true, file.ID, hunk)
+	key := resultKey(m.snapshot.ID, true, file.ID, hunk)
+	if m.results[key] != nil {
+		return key
+	}
+	hunkHeader := ""
+	if hunk != nil {
+		hunkHeader = hunk.Header
+	}
+	if m.lastAnalysisPath == file.DisplayPath() && m.lastAnalysisHunk == hunkHeader {
+		return m.lastAnalysisKey
+	}
+	return key
 }
 
 func (m Model) statusLine() string {

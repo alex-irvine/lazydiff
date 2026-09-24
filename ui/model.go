@@ -123,6 +123,9 @@ type Model struct {
 	diffWarn         error
 	diffStyled       bool
 	results          map[string]*analysisResult
+	lastAnalysisKey  string
+	lastAnalysisPath string
+	lastAnalysisHunk string
 	requests         map[string]context.CancelFunc
 	requestSeq       uint64
 	status           string
@@ -1152,7 +1155,7 @@ func (m Model) renderSelectedCmd() tea.Cmd {
 	}
 }
 
-func (m Model) startAnalysis(detail bool) tea.Cmd {
+func (m *Model) startAnalysis(detail bool) tea.Cmd {
 	if !m.haveSnap || m.runner == nil {
 		return nil
 	}
@@ -1190,6 +1193,12 @@ func (m Model) startAnalysis(detail bool) tea.Cmd {
 	if err != nil {
 		result.Active, result.Error = false, err
 		return nil
+	}
+	m.lastAnalysisKey = key
+	m.lastAnalysisPath = file.DisplayPath()
+	m.lastAnalysisHunk = ""
+	if hunk != nil {
+		m.lastAnalysisHunk = hunk.Header
 	}
 	runner, send := m.runner, m.send
 	return func() tea.Msg {
