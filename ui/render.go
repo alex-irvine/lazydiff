@@ -340,7 +340,7 @@ func (m Model) renderTabBar() string {
 		if m.selectedWorktree != "" {
 			name = filepath.Base(m.selectedWorktree)
 		}
-		return active(name) + "  " + inactive("Branch") + "  " + inactive("PRs")
+		return active("[1] "+name) + "  " + inactive("Branch") + "  " + inactive("PRs")
 	case TreeModeStaged:
 		return active("[1] Worktree") + "  " + inactive("Branch") + "  " + inactive("PRs")
 	case TreeModeBranchDiff:
