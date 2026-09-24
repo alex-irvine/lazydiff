@@ -64,6 +64,35 @@ func TestTreeEmptyState(t *testing.T) {
 	}
 }
 
+func TestTreePreservesCollapsedFoldersAfterRefresh(t *testing.T) {
+	files := []diff.File{{ID: "file:a", Path: "src/nested/a.go", Status: diff.Modified}}
+	tree := NewTree(files)
+	tree.Move(1) // nested folder
+	tree.CollapseOrParent()
+	tree.Move(-1) // src folder
+	tree.CollapseOrParent()
+	tree.SetFiles(files)
+	tree.SetFiles(files)
+	if len(tree.Rows()) != 1 || tree.roots[0].Expanded {
+		t.Fatal("collapsed parent folder reopened after refresh")
+	}
+	if tree.selectedID != "dir:src/" {
+		t.Fatalf("selection = %q, want collapsed parent", tree.selectedID)
+	}
+	tree.ExpandOrDescend()
+	if len(tree.Rows()) != 2 || tree.roots[0].Children[0].Expanded {
+		t.Fatal("collapsed nested folder reopened after refresh")
+	}
+}
+
+func TestTreeNewFoldersDefaultToExpandedAfterRefresh(t *testing.T) {
+	tree := NewTree(nil)
+	tree.SetFiles([]diff.File{{ID: "file:a", Path: "src/a.go", Status: diff.Added}})
+	if len(tree.Rows()) != 2 || !tree.roots[0].Expanded {
+		t.Fatal("new folder should start expanded")
+	}
+}
+
 func TestToggleCheckOnHunkSetsOnlyThatHunk(t *testing.T) {
 	tree := NewTree(testFiles())
 	tree.Toggle() // expand a.go

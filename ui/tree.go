@@ -69,8 +69,8 @@ func (t *TreeModel) collectExpandedIDs() map[string]bool {
 	var walk func([]*TreeNode)
 	walk = func(nodes []*TreeNode) {
 		for _, n := range nodes {
-			if n.Expanded && !n.IsLeaf() {
-				ids[n.ID()] = true
+			if !n.IsLeaf() {
+				ids[n.ID()] = n.Expanded
 			}
 			if len(n.Children) > 0 {
 				walk(n.Children)
@@ -83,8 +83,8 @@ func (t *TreeModel) collectExpandedIDs() map[string]bool {
 
 func (t *TreeModel) applyExpandedIDs(nodes []*TreeNode, ids map[string]bool) {
 	for _, n := range nodes {
-		if ids[n.ID()] {
-			n.Expanded = true
+		if expanded, exists := ids[n.ID()]; exists {
+			n.Expanded = expanded
 		}
 		if len(n.Children) > 0 {
 			t.applyExpandedIDs(n.Children, ids)
