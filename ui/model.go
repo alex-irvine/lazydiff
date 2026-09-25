@@ -521,32 +521,17 @@ func (m Model) updateSearchKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		m.searchActive = false
-		return m, nil
-	case "n":
-		visible := m.visibleNodes()
-		for i, n := range visible {
-			if n.ID() == m.tree.selectedID && i < len(visible)-1 {
-				m.tree.selectNode(visible[i+1])
-				break
-			}
-		}
-		return m, nil
-	case "N":
-		visible := m.visibleNodes()
-		for i, n := range visible {
-			if n.ID() == m.tree.selectedID && i > 0 {
-				m.tree.selectNode(visible[i-1])
-				break
-			}
-		}
-		return m, nil
+		return m.settleSearchSelection(), nil
 	case "backspace":
 		if len(m.searchQuery) > 0 {
 			m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
 		}
 		return m.applySearchFilter(), nil
 	default:
-		m.searchQuery += key.String()
+		if key.Type != tea.KeyRunes {
+			return m, nil
+		}
+		m.searchQuery += string(key.Runes)
 		return m.applySearchFilter(), nil
 	}
 }
@@ -709,7 +694,7 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		} else if m.focus == FocusTree && m.treeMode == TreeModeWorktree && m.worktreeSelector != nil {
 			m.worktreeSelector.Move(-1)
 		} else if m.focus == FocusTree {
-			m.tree.Move(-1)
+			m = m.moveTreeSelection(-1)
 			m.diffScroll = 0
 			return m, m.renderSelectedCmd()
 		}
@@ -729,7 +714,7 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		} else if m.focus == FocusTree && m.treeMode == TreeModeWorktree && m.worktreeSelector != nil {
 			m.worktreeSelector.Move(1)
 		} else if m.focus == FocusTree {
-			m.tree.Move(1)
+			m = m.moveTreeSelection(1)
 			m.diffScroll = 0
 			return m, m.renderSelectedCmd()
 		}
@@ -836,6 +821,7 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		if m.focus == FocusTree {
 			m.searchActive = true
 			m.searchQuery = ""
+			m.searchFilter = nil
 			return m, nil
 		}
 	case "x":
@@ -940,7 +926,11 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case "?":
 		m.showHelp = !m.showHelp
 	case "esc":
-		if m.showHelp {
+		if m.searchFilter != nil || m.searchActive {
+			m.searchActive = false
+			m.searchQuery = ""
+			m.searchFilter = nil
+		} else if m.showHelp {
 			m.showHelp = false
 		} else if m.focus == FocusTree && m.treeMode == TreeModeWorktreeDiff {
 			m.treeMode = TreeModeWorktree
@@ -1485,6 +1475,56 @@ func nodeSearchLabel(n *TreeNode) string {
 		return n.File.DisplayPath()
 	}
 	return n.Label
+}
+
+// settleSearchSelection lands the cursor inside a freshly committed search
+// filter: if the selected node is filtered out, select the first match.
+func (m Model) settleSearchSelection() Model {
+	visible := m.visibleNodes()
+	if len(visible) == 0 {
+		return m
+	}
+	for _, n := range visible {
+		if n.ID() == m.tree.selectedID {
+			return m
+		}
+	}
+	m.tree.selectNode(visible[0])
+	return m
+}
+
+// moveTreeSelection moves the tree cursor through the rows currently on
+// screen, so j/k respects an active search filter instead of stepping onto
+// hidden nodes.
+func (m Model) moveTreeSelection(delta int) Model {
+	if m.searchFilter == nil {
+		m.tree.Move(delta)
+		return m
+	}
+	visible := m.visibleNodes()
+	if len(visible) == 0 {
+		return m
+	}
+	index := -1
+	for i, n := range visible {
+		if n.ID() == m.tree.selectedID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		m.tree.selectNode(visible[0])
+		return m
+	}
+	index += delta
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(visible) {
+		index = len(visible) - 1
+	}
+	m.tree.selectNode(visible[index])
+	return m
 }
 
 // changeContextBudget is how much of the wider diff the detail prompt will

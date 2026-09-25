@@ -188,15 +188,29 @@ func (t *TreeModel) flatten() {
 }
 
 func (t *TreeModel) ClampScroll(contentH int) {
-	if len(t.flatNodes) == 0 {
+	t.ClampScrollAt(t.cursor, len(t.flatNodes), contentH)
+}
+
+// ClampScrollAt keeps the row at index visible within a list of total rows.
+// ClampScroll is the unfiltered case; an active search filter changes which
+// row indices are on screen, so the visible list's index/total are passed in
+// explicitly.
+func (t *TreeModel) ClampScrollAt(index, total, contentH int) {
+	if total == 0 {
 		t.scrollOffset = 0
 		return
 	}
-	if t.cursor < t.scrollOffset {
-		t.scrollOffset = t.cursor
+	if index < t.scrollOffset {
+		t.scrollOffset = index
 	}
-	if t.cursor >= t.scrollOffset+contentH {
-		t.scrollOffset = t.cursor - contentH + 1
+	if index >= t.scrollOffset+contentH {
+		t.scrollOffset = index - contentH + 1
+	}
+	if t.scrollOffset < 0 {
+		t.scrollOffset = 0
+	}
+	if t.scrollOffset >= total {
+		t.scrollOffset = total - 1
 	}
 }
 

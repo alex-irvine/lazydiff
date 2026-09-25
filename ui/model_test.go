@@ -1349,6 +1349,81 @@ func TestSearchResetsOnEsc(t *testing.T) {
 	}
 }
 
+func TestSearchTypesNAsQueryCharacter(t *testing.T) {
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.searchActive = true
+	model, _ = model.updateSearchKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if model.searchQuery != "n" {
+		t.Fatalf("searchQuery = %q, want %q", model.searchQuery, "n")
+	}
+}
+
+func searchableModel(t *testing.T, query string) Model {
+	t.Helper()
+	files := []diff.File{
+		{ID: "file:a", Path: "a.go", Status: diff.Modified},
+		{ID: "file:b", Path: "b.go", Status: diff.Modified},
+		{ID: "file:c", Path: "c.txt", Status: diff.Modified},
+	}
+	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
+	model.termW, model.termH = 120, 40
+	model.layout = ComputeLayout(120, 40)
+	model.snapshot = git.Snapshot{ID: "one", Mode: git.WorkingTree, Files: files}
+	model.haveSnap = true
+	model.tree = NewTree(files)
+	model.focus = FocusTree
+	model.searchActive = true
+	model.searchQuery = query
+	model = model.applySearchFilter()
+	model, _ = model.updateSearchKey(tea.KeyMsg{Type: tea.KeyEnter})
+	return model
+}
+
+func TestSearchEnterKeepsFilterAndSelectsVisibleMatch(t *testing.T) {
+	model := searchableModel(t, "b.go")
+	if model.searchActive {
+		t.Fatal("enter should leave search input")
+	}
+	if model.searchFilter == nil {
+		t.Fatal("enter should keep the filter")
+	}
+	file, _, ok := model.tree.Selected()
+	if !ok || file.Path != "b.go" {
+		t.Fatalf("selection = %+v, want b.go", file.Path)
+	}
+}
+
+func TestSearchNavigationStaysInsideFilter(t *testing.T) {
+	model := searchableModel(t, ".go")
+
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	file, _, _ := model.tree.Selected()
+	if file.Path != "b.go" {
+		t.Fatalf("after j, selection = %q, want b.go", file.Path)
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	file, _, _ = model.tree.Selected()
+	if file.Path != "b.go" {
+		t.Fatalf("j past last match should stay on b.go, got %q", file.Path)
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	file, _, _ = model.tree.Selected()
+	if file.Path != "a.go" {
+		t.Fatalf("after k, selection = %q, want a.go", file.Path)
+	}
+}
+
+func TestSearchEscAfterEnterClearsFilter(t *testing.T) {
+	model := searchableModel(t, ".go")
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.searchFilter != nil || model.searchQuery != "" {
+		t.Fatal("esc should clear a committed filter")
+	}
+	if got := len(model.visibleNodes()); got != len(model.tree.Rows()) {
+		t.Fatalf("visible nodes = %d, want full tree %d", got, len(model.tree.Rows()))
+	}
+}
+
 func TestWorktreeSelectorCreatedOnBranchesLoaded(t *testing.T) {
 	model := newTestModel(&fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakeRunner{})
 	wt := map[string]string{"feature": "/wt/feature", "main": "/repo"}

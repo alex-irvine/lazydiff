@@ -149,9 +149,15 @@ func (m Model) renderTree(r Rect) string {
 	title := m.renderTabBar()
 	titleRendered := delta.Truncate(title, max(1, r.W-2))
 	lines := []string{titleRendered}
+	searchBarShown := false
 	if m.searchActive {
-		searchBar := "/" + m.searchQuery + "_  [n]next [N]prev [esc]cancel"
+		searchBar := "/" + m.searchQuery + "_  [enter]accept [esc]cancel"
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("228")).Render(delta.Truncate(searchBar, max(1, r.W-2))))
+		searchBarShown = true
+	} else if m.searchFilter != nil {
+		searchBar := "/" + m.searchQuery + "  [esc]clear"
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("228")).Render(delta.Truncate(searchBar, max(1, r.W-2))))
+		searchBarShown = true
 	}
 	nodes := m.visibleNodes()
 	if len(nodes) == 0 {
@@ -160,10 +166,24 @@ func (m Model) renderTree(r Rect) string {
 		return box(r, strings.Join(padLines(lines, r.H-2), "\n"), m.focus == FocusTree)
 	}
 	contentH := r.H - 3
+	if searchBarShown {
+		contentH--
+	}
 	if contentH < 1 {
 		contentH = 1
 	}
-	m.tree.ClampScroll(contentH)
+	if m.searchFilter != nil {
+		selected := 0
+		for i, node := range nodes {
+			if node.ID() == m.tree.selectedID {
+				selected = i
+				break
+			}
+		}
+		m.tree.ClampScrollAt(selected, len(nodes), contentH)
+	} else {
+		m.tree.ClampScroll(contentH)
+	}
 	scroll := m.tree.scrollOffset
 	if scroll < 0 {
 		scroll = 0
@@ -534,6 +554,7 @@ func (m Model) helpText() string {
 		key("tab", "Cycle focus forward"),
 		key("j / k", "Navigate tree / scroll diff"),
 		key("h / l", "Collapse / expand tree node"),
+		key("/", "Search files (enter accept, esc clear)"),
 		key("g / G", "Scroll to top / bottom"),
 		"",
 		section("Staging"),

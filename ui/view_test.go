@@ -162,7 +162,7 @@ func TestSearchIndicatorRendersInTreePane(t *testing.T) {
 	model.searchActive = true
 	model.searchQuery = "a.go"
 	treePane := model.renderTree(model.layout.Files)
-	if !strings.Contains(treePane, "/a.go_") || !strings.Contains(treePane, "[n]") || !strings.Contains(treePane, "[N]") {
+	if !strings.Contains(treePane, "/a.go_") || !strings.Contains(treePane, "[enter]") || !strings.Contains(treePane, "[esc]") {
 		t.Fatalf("expected search indicator in tree pane:\n%s", treePane)
 	}
 }
