@@ -994,6 +994,23 @@ func TestPendingPRKeyClearsOnUnrelatedKeypress(t *testing.T) {
 	}
 }
 
+func TestPRDiffEOpensSelectedFileInEditor(t *testing.T) {
+	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{})
+	files := []diff.File{{ID: "file:login", Path: "login.go", Status: diff.Modified}}
+	model.snapshot = git.Snapshot{ID: "one", Mode: git.WorkingTree, Files: files}
+	model.haveSnap = true
+	model.tree = NewTree(files)
+	model.focus = FocusTree
+	model.searchActive = true
+	model.searchQuery = "login"
+	model = model.applySearchFilter()
+	model, _ = model.updateSearchKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	if cmd == nil {
+		t.Fatal("e in a PR diff should open the selected file in the editor")
+	}
+}
+
 func TestConfirmDialogStaysOpenAndShowsErrorOnActionFailure(t *testing.T) {
 	model := modelInPRDiff(t, &fakeLoader{snapshots: []git.Snapshot{makeSnapshot("one")}}, &fakePRReviewer{err: fmt.Errorf("gh: unauthorized")})
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})

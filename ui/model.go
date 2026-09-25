@@ -849,6 +849,16 @@ func (m Model) updateKey(key tea.KeyMsg) (Model, tea.Cmd) {
 				return m, m.openBranchFileCmd(m.branchSelector.selectedBranch, file.Path, wtPath)
 			}
 		}
+		if m.focus == FocusTree && m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
+			if file, _, ok := m.tree.Selected(); ok {
+				head := m.prSelector.selectedPR.HeadRefName
+				var wtPath string
+				if m.branchSelector != nil {
+					wtPath, _ = m.branchSelector.WorktreePath(head)
+				}
+				return m, m.openBranchFileCmd(head, file.Path, wtPath)
+			}
+		}
 	case "o":
 		if m.treeMode == TreeModePRDiff && m.prSelector != nil && m.prSelector.selectedPR != nil {
 			return m, m.openPRInBrowserCmd()
